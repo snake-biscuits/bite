@@ -2,9 +2,9 @@
 from __future__ import annotations
 import enum
 import io
-import os
-from typing import List, Tuple
+from typing import Dict, Tuple, Union
 
+from . import base
 from .utils import read_struct, write_struct
 
 
@@ -12,10 +12,11 @@ class DXGI(enum.Enum):
     BC6H_UF16 = 0x5F  # the only format we care about
 
 
-class DDS:
+class DDS(base.Texture):
+    extension: str = "dds"
     filename: str
     # header
-    size: Tuple[int, int]  # width, height
+    size: base.Size
     num_mipmaps: int
     # DX10 extended header
     format: DXGI
@@ -23,39 +24,27 @@ class DDS:
     misc_flag: int  # TODO: enum
     array_size: int
     # pixel data
-    mipmaps: List[bytes]
-    # TODO: use same mipmap indexing style as VTF
-    # -- need to support dds.resource_dimension != 3
-    # mipmaps: Dict[Tuple[int, int, int], bytes]
-    # # ^ {(mip_index, cubemap_index, side_index): raw_mipmap_data}
+    mipmaps: Dict[Tuple[int, int, int], bytes]
+    # ^ {(mip_index, cubemap_index, side_index): raw_mipmap_data}
+    raw_data: Union[bytes, None]  # if mipmaps cannot be split
 
     def __init__(self):
-        self.mipmaps = list()
+        super().__init__()
         # defaults
         self.array_size = 1
-        self.filename = "untitled.dds"
         self.format = DXGI.BC6H_UF16
         self.misc_flag = 0
         self.num_mipmaps = 0
         self.resource_dimension = 3
-        self.size = (0, 0)
 
     def __repr__(self) -> str:
         width, height = self.size
         size = f"{width}x{height}"
         return f"<DDS '{self.filename}' {size} {self.format.name}>"
 
-    # NOTE: sizeof(header) + sizeof(extended_header) = 148 (start of mips)
-    def read(self, offset: int, length: int) -> bytes:
-        """pull data after initial header parse"""
-        with open(self.filename, "rb") as dds_file:
-            dds_file.seek(offset)
-            assert dds_file.tell() == offset, f"offset is past EOF ({dds_file.tell()})"
-            out = dds_file.read(length)
-            assert dds_file.tell() == offset + length, f"read past EOF ({dds_file.tell()})"
-        return out
-
+    # TODO: return List[DDS] instead of using .save_as()
     def split(self):
+        """separate a cubemap array into multiple files"""
         assert self.filename.endswith(".dds")
         base_filename = self.filename[:-4]
         for i in range(self.array_size):
@@ -72,73 +61,85 @@ class DDS:
             child.save_as(f"{base_filename}.{i}.dds")
 
     @classmethod
-    def from_bytes(cls, raw_dds: bytes) -> DDS:
-        return cls.from_stream(io.BytesIO(raw_dds))
-
-    @classmethod
-    def from_file(cls, filename: str) -> DDS:
-        with open(filename, "rb") as dds_file:
-            out = cls.from_stream(dds_file)
-        out.filename = filename
-        return out
-
-    @classmethod
-    def from_stream(cls, dds_file: io.BytesIO) -> DDS:
+    def from_stream(cls, stream: io.BytesIO) -> DDS:
         out = cls()
         # header
-        assert dds_file.read(4) == b"DDS "
-        assert read_struct(dds_file, "2I") == (0x7C, 0x000A1007)  # version?
-        out.size = read_struct(dds_file, "2I")
-        assert read_struct(dds_file, "2I") == (0x00010000, 0x01)  # pitch / linsize?
-        out.num_mipmaps = read_struct(dds_file, "I")
-        assert dds_file.read(44) == b"\0" * 44
-        assert read_struct(dds_file, "2I") == (0x20, 0x04)  # don't know, don't care
+        assert stream.read(4) == b"DDS "
+        assert read_struct(stream, "2I") == (0x7C, 0x000A1007)  # version?
+        out.size = read_struct(stream, "2I")
+        assert read_struct(stream, "2I") == (0x00010000, 0x01)  # pitch / linsize?
+        out.num_mipmaps = read_struct(stream, "I")
+        assert stream.read(44) == b"\0" * 44
+        assert read_struct(stream, "2I") == (0x20, 0x04)  # don't know, don't care
         # DX10 extended header
-        assert dds_file.read(4) == b"DX10"
-        assert dds_file.read(20) == b"\0" * 20
-        assert read_struct(dds_file, "I") == 0x00401008  # idk, some flags?
-        assert dds_file.read(16) == b"\0" * 16
-        out.format = DXGI(read_struct(dds_file, "I"))
-        out.resource_dimension = read_struct(dds_file, "I")
-        out.misc_flag = read_struct(dds_file, "I")
-        out.array_size = read_struct(dds_file, "I")
-        assert dds_file.read(4) == b"\0" * 4  # reserved
+        assert stream.read(4) == b"DX10"
+        assert stream.read(20) == b"\0" * 20
+        assert read_struct(stream, "I") == 0x00401008  # idk, some flags?
+        assert stream.read(16) == b"\0" * 16
+        out.format = DXGI(read_struct(stream, "I"))
+        out.resource_dimension = read_struct(stream, "I")
+        out.misc_flag = read_struct(stream, "I")
+        out.array_size = read_struct(stream, "I")
+        assert stream.read(4) == b"\0" * 4  # reserved
         # pixel data
         if out.format == DXGI.BC6H_UF16:
-            mip_sizes = [max(1 << i, 4) ** 2 for i in range(out.num_mipmaps)]
-            for i in range(out.array_size):
-                mipmaps = [
-                    dds_file.read(mip_size)
-                    for mip_size in reversed(mip_sizes)]
-                out.mipmaps.extend(mipmaps[::-1])  # biggest first
+            mip_sizes = [
+                max(1 << i, 4) ** 2
+                for i in reversed(range(out.num_mipmaps))]
+            if out.resource_dimension == 3:  # cubemap array
+                assert out.array_size % 6 == 0
+                num_frames = out.array_size // 6
+                out.mipmaps = {
+                    base.MipIndex(mip, frame, face): stream.read(mip_size)
+                    for frame in range(num_frames)
+                    for face in base.Face
+                    for mip, mip_size in enumerate(mip_sizes)}
+            else:
+                out.mipmaps = {
+                    base.MipIndex(mip, frame): stream.read(mip_size)
+                    for frame in out.array_size
+                    for mip, mip_size in enumerate(mip_sizes)}
         else:
-            # TODO: UserWarning("compression size unknown, cannot extract mipmaps")
-            # TODO: UserWarning("use .read(offset, size) to get the mipmaps yourself")
-            return out  # exit early
+            # TODO: UserWarning("unknown pixel format, could not parse mips")
+            out.raw_data = stream.read()
+            return out
         return out
 
-    def save_as(self, filename: str):
-        os.makedirs(os.path.dirname(filename), exist_ok=True)
-        with open(filename, "wb") as dds_file:
-            # header
-            write_struct(dds_file, "4s", b"DDS ")
-            write_struct(dds_file, "2I", 0x7C, 0x000A1007)  # version?
-            write_struct(dds_file, "2I", *self.size)
-            write_struct(dds_file, "2I", 0x00010000, 0x01)  # pitch / linsize?
-            write_struct(dds_file, "I", self.num_mipmaps)
-            write_struct(dds_file, "44s", b"\0" * 44)
-            write_struct(dds_file, "2I", 0x20, 0x04)  # don't know, don't care
-            # DX10 extended header
-            write_struct(dds_file, "4s", b"DX10")
-            write_struct(dds_file, "20s", b"\0" * 20)
-            write_struct(dds_file, "I", 0x00401008)  # idk, some flags?
-            write_struct(dds_file, "16s", b"\0" * 16)
-            write_struct(dds_file, "I", self.format.value)
-            write_struct(dds_file, "I", self.resource_dimension)
-            write_struct(dds_file, "I", self.misc_flag)
-            write_struct(dds_file, "I", self.array_size)
-            write_struct(dds_file, "4s", b"\0" * 4)  # reserved
-            # pixel data
-            for i in range(self.array_size):
-                for j in reversed(range(self.num_mipmaps)):
-                    dds_file.write(self.mipmaps[j])
+    def as_bytes(self) -> bytes:
+        stream = io.BytesIO()
+        # header
+        write_struct(stream, "4s", b"DDS ")
+        write_struct(stream, "2I", 0x7C, 0x000A1007)  # version?
+        write_struct(stream, "2I", *self.size)
+        write_struct(stream, "2I", 0x00010000, 0x01)  # pitch / linsize?
+        write_struct(stream, "I", self.num_mipmaps)
+        write_struct(stream, "44s", b"\0" * 44)
+        write_struct(stream, "2I", 0x20, 0x04)  # don't know, don't care
+        # DX10 extended header
+        write_struct(stream, "4s", b"DX10")
+        write_struct(stream, "20s", b"\0" * 20)
+        write_struct(stream, "I", 0x00401008)  # idk, some flags?
+        write_struct(stream, "16s", b"\0" * 16)
+        write_struct(stream, "I", self.format.value)
+        write_struct(stream, "I", self.resource_dimension)
+        write_struct(stream, "I", self.misc_flag)
+        write_struct(stream, "I", self.array_size)
+        write_struct(stream, "4s", b"\0" * 4)  # reserved
+        # mip data
+        if isinstance(self.raw_data, bytes):
+            stream.write(self.raw_data)
+        else:
+            if self.resource_dimension == 3:  # cubemap
+                stream.write(b"".join([
+                    self.mipmaps[base.MipIndex(mip, frame, face)]
+                    for frame in range(self.array_size)
+                    for face in base.Face
+                    for mip in reversed(range(self.num_mipmaps))]))
+            else:
+                stream.write(b"".join([
+                    self.mipmaps[base.MipIndex(mip, frame)]
+                    for frame in range(self.array_size)
+                    for mip in reversed(range(self.num_mipmaps))]))
+        # stream -> bytes
+        stream.seek(0)
+        return stream.read()

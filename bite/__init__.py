@@ -1,10 +1,14 @@
 __all__ = [
-    "dds", "utils", "vtf",
+    "base", "utils",
+    "dds", "vtf",
     "DDS", "VTF"]
 
-from . import dds
+# core
+from . import base
 from . import utils
+# format scripts
+from . import dds
 from . import vtf
-
+# classes
 from .dds import DDS
 from .vtf import VTF
