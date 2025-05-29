@@ -2,7 +2,7 @@ from __future__ import annotations
 import enum
 import io
 import os
-from typing import Any, Dict, Tuple, Union
+from typing import Dict, Tuple, Union
 
 
 Size = Tuple[int, int]
@@ -45,6 +45,9 @@ class MipIndex:
 
     def __hash__(self):
         return hash((self.mip, self.frame, self.face))
+
+    def __iter__(self):
+        return iter((self.mip, self.frame, self.face))
 
 
 class Texture:
