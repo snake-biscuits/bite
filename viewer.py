@@ -38,18 +38,26 @@ void main()
 """
 
 
+# NOTE: having texture manager spawn a viewer window might be better
 class TextureManager:
-    texture: bite.base.Texture
-    index: bite.base.MipIndex
-    # TODO: if texture is not a cubemap, set face to None
+    texture: bite.Texture
+    index: bite.MipIndex
+    # imgui item tags
     texture_tag: str
     preview_tag: str
+    # sliders
+    mip_tag: str
+    frame_tag: str
+    face_tag: str
 
-    def __init__(self, texture_tag: str, preview_tag: str):
+    def __init__(self, texture, preview, mip, frame, face):
         self.texture = None
-        self.index = bite.base.MipIndex(0, 0, None)
-        self.texture_tag = texture_tag
-        self.preview_tag = preview_tag
+        self.index = bite.MipIndex(0, 0, None)
+        self.texture_tag = texture
+        self.preview_tag = preview
+        self.mip_tag = mip
+        self.frame_tag = frame
+        self.face_tag = face
 
     def load_callback(self, sender: str, app_data: Dict[str, Any]):
         for name, path in app_data["selections"].items():
@@ -65,33 +73,28 @@ class TextureManager:
         base, ext = os.path.splitext(path.lower())
         if ext == ".vtf":
             self.texture = bite.VTF.from_file(path)
-            print(f"{self.texture=}")
-            print(f"{self.texture.num_mipmaps=}")
-            print(f"{self.texture.num_frames=}")
-            # TODO: is cubemap
-            print(f"{self.texture.format.name=}")
         elif ext == ".dds":
             self.texture = bite.DDS.from_file(path)
-            print(f"{self.texture=}")
-            print(f"{self.texture.num_mipmaps=}")
-            print(f"{self.texture.array_size=}")
-            print(f"{self.texture.resource_dimension=}")  # is cubemap
-            print(f"{self.texture.format.name=}")
         else:
             raise RuntimeError(f"Unknown Extension: {ext!r}")
+        # reset self.index
         num_mips, num_frames, is_cubemap = self.scope()
         if is_cubemap:
-            self.index = bite.base.MipIndex(0, 0, bite.base.Face(0))
+            self.index = bite.MipIndex(0, 0, bite.Face(0))
         else:
-            self.index = bite.base.MipIndex(0, 0, None)
-        # TODO: update sliders
+            self.index = bite.MipIndex(0, 0, None)
+        # set slider ranges
+        # NOTE: setting slider value to zero doesn't update it visually
+        imgui.configure_item(self.mip_tag, max_value=num_mips - 1)
+        imgui.configure_item(self.frame_tag, max_value=num_frames - 1)
+        imgui.configure_item(self.face_tag, enabled=is_cubemap)
 
     def mip_size(self, mip: int) -> (int, int):
         return [
             axis // (1 << mip)
             for axis in self.texture.size]
 
-    def mip_float32(self, index: bite.base.MipIndex) -> np.array:
+    def mip_float32(self, index: bite.MipIndex) -> np.array:
         texture_bytes = self.texture.mipmaps[index] * 4
         # NOTE: x4 for BC6 compression factor
         # TODO: use OpenGL framebuffer to convert texture on the GPU
@@ -131,12 +134,39 @@ class TextureManager:
         is_cubemap = bite.vtf.Flags.ENVMAP in vtf.flags
         return (vtf.num_mipmaps, vtf.num_frames, is_cubemap)
 
+    def mip_callback(self):
+        mip, frame, face = self.index
+        mip = imgui.get_value(self.mip_tag)
+        self.index = bite.MipIndex(mip, frame, face)
+        self.update()
+
+    def frame_callback(self):
+        mip, frame, face = self.index
+        frame = imgui.get_value(self.frame_tag)
+        self.index = bite.MipIndex(mip, frame, face)
+        self.update()
+
+    def face_callback(self):
+        mip, frame, face = self.index
+        if self.scope()[-1]:  # is_cubemap
+            face_index = imgui.get_value(self.face_tag)
+            face = bite.Face(face_index)
+        else:  # force to None, just in case
+            face = None
+        self.index = bite.MipIndex(mip, frame, face)
+        self.update()
+
 
 if __name__ == "__main__":
 
     imgui.create_context()
 
-    texture_manager = TextureManager("framebuffer_tex", "preview_image")
+    texture_manager = TextureManager(
+        "framebuffer_tex",
+        "preview_image",
+        "mip_level",
+        "frame",
+        "cubemap_face")
 
     # default texture
     texture_floats = (np.array(
@@ -161,21 +191,45 @@ if __name__ == "__main__":
         imgui.add_file_extension("Direct Draw Surface (*.dds){.dds}")
         imgui.add_file_extension("Valve Texture Format (*.vtf){.vtf}")
 
-    with imgui.window(tag="Main Window"):
-        # ...
-        imgui.add_button(
-            label="Update",
-            callback=texture_manager.update)
-        # ...
-        imgui.add_button(
-            label="Open",
-            callback=lambda: imgui.show_item("file_browser"))
-        # ...
-        imgui.add_image("framebuffer_tex", tag="preview_image")
+    # NOTE: forcing 4k min size to ensure we fill the viewport
+    with imgui.window(tag="main", min_size=(4096, 4096)):
+        with imgui.menu_bar():
+            imgui.add_menu_item(
+                label="Open",
+                callback=lambda: imgui.show_item("file_browser"))
+
+        with imgui.group(horizontal=True):
+            with imgui.group(width=192):
+                imgui.add_slider_int(
+                    label="Mip Level",
+                    min_value=0, max_value=0,
+                    callback=texture_manager.mip_callback,
+                    tag="mip_level")
+                imgui.add_slider_int(
+                    label="Frame",
+                    min_value=0, max_value=0,
+                    callback=texture_manager.frame_callback,
+                    tag="frame")
+                imgui.add_slider_int(
+                    label="Cubemap Face",
+                    min_value=0, max_value=5,
+                    enabled=False,
+                    callback=texture_manager.face_callback,
+                    tag="cubemap_face")
+            with imgui.group():
+                imgui.add_image("framebuffer_tex", tag="preview_image")
+                # TODO: viewer controls
+                # -- mip
+                # -- frame
+                # -- face
+                # -- render mode (single mip, 3D cubemap, equilateral)
+                # TODO: zoom
+                # -- on scroll
+                # -- slider
 
     imgui.create_viewport(title="bite viewer", width=512, height=512)
     imgui.setup_dearpygui()
     imgui.show_viewport()
-    # imgui.set_primary_window("Main Window", True)
+    imgui.set_primary_window("main", True)
     imgui.start_dearpygui()
     imgui.destroy_context()
