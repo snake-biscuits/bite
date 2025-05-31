@@ -1,10 +1,14 @@
 # https://dearpygui.readthedocs.io/en/latest/documentation/
 # https://gist.github.com/leon-nn/cd4e3d50eb0fa23d8e197102f49f2cb3
+import enum
 import os
 from typing import Any, Dict, List, Tuple
 
 import dearpygui.dearpygui as imgui
 import numpy as np
+from OpenGL.error import GLError
+import OpenGL.GL as gl
+import OpenGL.GLUT as glut
 
 import bite
 
@@ -31,11 +35,243 @@ out vec4 outColour;
 
 in vec2 position;  // also uv
 
+// TODO: sampler
+// TODO: texture
+
 void main()
 {
     outColour = vec4(position, 0.0, 1.0);
 }
 """
+
+
+# NOTE: stored in GL.ARB.texture_compression_bptc
+# -- also glInitTextureCompressionBptcARB() -> bool
+class BPTC(enum.Enum):
+    # https://registry.khronos.org/OpenGL/extensions/ARB/ARB_texture_compression_bptc.txt
+    # GL_ARB_texture_compression_bptc
+    # RGBA
+    RGBA = 0x8E8C  # COMPRESSED_RGBA_BPTC_UNORM_ARB
+    SRGB = 0x8E8D  # COMPRESSED_SRGB_ALPHA_BPTC_UNORM_ARB
+    # RGB
+    SIGNED_FLOAT = 0x8E8E  # COMPRESSED_RGB_BPTC_SIGNED_FLOAT_ARB
+    UNSIGNED_FLOAT = 0x8E8F  # COMPRESSED_RGB_BPTC_UNSIGNED_FLOAT_ARB
+
+
+internal_format = {
+    ".dds": {
+        bite.dds.DXGI.BC6H_UF16: (BPTC.UNSIGNED_FLOAT.value, True)},
+    ".vtf": {
+        bite.vtf.Format.BC6H_UF16: (BPTC.UNSIGNED_FLOAT.value, True)}}
+# ^ {".ext": {texture.format: (gl_format, is_compressed)}}
+
+
+class Renderer:
+    # core handles
+    window: int
+    vertex_buffer: int
+    index_buffer: int
+    shader: int
+    # texture handles
+    active_texture: int
+    textures: Dict[Tuple[bite.Size, int], int]
+    # ^ {((width, height), format_): handle}
+
+    def __init__(self, size, shaders, vertices, attribs, indices):
+        # size: bite.Size
+        # shaders: Dict[int, str]
+        # ^ {gl.GL_VERTEX_SHADER: "vertex shader text"}
+        # vertices: np.array(..., dtype=np.float32)
+        # attribs: [(gl.GL_FLOAT, 3, False)]
+        # indices: np.array(..., dtype=np.uint32)
+        glut.glutInit()
+        self.window = glut.glutCreateWindow("GLUT")
+        glut.glutHideWindow()
+        self.print_metadata()
+        # gl state
+        gl.glViewport(0, 0, *size)
+        # gl objects
+        self.init_framebuffer(size)
+        self.init_geo(vertices, attribs, indices)
+        self.init_shaders(shaders)
+        # NOTE: user should add textures & set active texture before rendering
+        self.textures = dict()
+        self.active_texture = 0  # unbind
+
+    def print_metadata(self):
+        major = gl.glGetIntegerv(gl.GL_MAJOR_VERSION)
+        minor = gl.glGetIntegerv(gl.GL_MINOR_VERSION)
+        version = gl.glGetString(gl.GL_VERSION).decode()
+        print(f"version: {major}.{minor} | {version}")
+        vendor = gl.glGetString(gl.GL_VENDOR).decode()
+        print(f"vendor: {vendor}")
+        hardware = gl.glGetString(gl.GL_RENDERER).decode()
+        print(f"hardware: {hardware}")
+        extensions = [
+            gl.glGetStringi(gl.GL_EXTENSIONS, i).decode()
+            for i in range(gl.glGetIntegerv(gl.GL_NUM_EXTENSIONS))]
+        print(f"{len(extensions)} extensions available")
+        # NOTE: ARB_shading_language_100 recommends looping until INVALID_ENUM
+        glsl_versions = list()
+        i = 0
+        while True:
+            try:
+                glsl_versions.append(gl.glGetStringi(
+                    gl.GL_SHADING_LANGUAGE_VERSION, i).decode())
+                i += 1
+            except GLError:
+                break  # INVALID_ENUM; reached last version
+        # NOTE: GLSL 1.00 uses an empty string for version
+        # -- this is because "#version" declarations were added in 1.10
+        # -- "100" is used for GLSL ES 1.00; there is no "100 es"
+        print(f"{len(glsl_versions)} GLSL versions available")
+        if len(glsl_versions) > 0:
+            print(f"latest GLSL version: {glsl_versions[0]}")
+
+    def init_texture(self, size: bite.Size, format_: int, data: bytes):
+        # create texture
+        if (size, format_) in self.textures:
+            width, height = size
+            # NOTE: format will be an int, we can't preserve the name here
+            raise RuntimeError(f"already have a {width}x{height} ({format_}) texture")
+        self.textures[(size, format_)] = gl.glGenTextures(1)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, self.textures[(size, format_)])
+        # add data
+        # TODO: cubemap faces
+        # -- gl.GL_TEXTURE_CUBE_MAP_{POSI,NEGA}TIVE_{X,Y,Z}
+        # TODO: force mip level when rendering
+        # -- gl.glTextureParameteri(target, gl.GL_TEXTURE_{MIN,MAX}_LOD, mip)
+        # TODO: identify if format is compressed or uncompressed
+        gl.glCompressedTexImage2D(gl.GL_TEXTURE_2D, 0, format_, *size, 0, len(data), data)
+        # pixelated filtering:
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_NEAREST)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_NEAREST)
+        # TODO: GL_TEXTURE_WRAP_S, GL_MIRROR_CLAMP_TO_EDGE
+        gl.glBindTexture(gl.GL_TEXTURE_2D, 0)  # unbind
+
+    def init_framebuffer(self, size):
+        # texture to save render colour
+        self.render_texture = gl.glGenTextures(1)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, self.render_texture)
+        gl.glTexImage2D(
+            gl.GL_TEXTURE_2D,
+            0, gl.GL_RGB, *size, 0, gl.GL_RGB,
+            gl.GL_UNSIGNED_BYTE, None)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_NEAREST)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_NEAREST)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, 0)  # unbind
+        # depth buffer
+        self.depth_buffer = gl.glGenRenderbuffers(1)
+        gl.glBindRenderbuffer(gl.GL_RENDERBUFFER, self.depth_buffer)
+        gl.glRenderbufferStorage(gl.GL_RENDERBUFFER, gl.GL_DEPTH_COMPONENT, *size)
+        gl.glBindRenderbuffer(gl.GL_RENDERBUFFER, 0)  # unbind
+        # colour buffer
+        self.frame_buffer = gl.glGenFramebuffers(1)
+        gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, self.frame_buffer)
+        gl.glFramebufferTexture2D(
+            gl.GL_FRAMEBUFFER,
+            gl.GL_COLOR_ATTACHMENT0,
+            gl.GL_TEXTURE_2D,
+            self.render_texture,
+            0)
+        # link it all together
+        gl.glFramebufferRenderbuffer(
+            gl.GL_FRAMEBUFFER,
+            gl.GL_DEPTH_ATTACHMENT,
+            gl.GL_RENDERBUFFER,
+            self.depth_buffer)
+        status = gl.glCheckFramebufferStatus(gl.GL_FRAMEBUFFER)
+        if status != gl.GL_FRAMEBUFFER_COMPLETE:
+            # NOTE: this is bad, the GPU can't handle this config!
+            raise RuntimeError(f"init_framebuffer failed: {status}")
+        gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, 0)  # unbind
+
+    def init_geo(self, vertices: np.array, attribs: List[Any], indices: np.array):
+        self.num_indices = indices.size
+        # buffer data
+        self.vertex_buffer, self.index_buffer = gl.glGenBuffers(2)
+        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, self.vertex_buffer)
+        gl.glBufferData(
+            gl.GL_ARRAY_BUFFER,
+            len(vertices.tobytes()),
+            vertices,
+            gl.GL_STATIC_DRAW)
+        gl.glBindBuffer(gl.GL_ELEMENT_ARRAY_BUFFER, self.index_buffer)
+        gl.glBufferData(
+            gl.GL_ELEMENT_ARRAY_BUFFER,
+            len(indices.tobytes()),
+            indices,
+            gl.GL_STATIC_DRAW)
+        # vertex array & attribs
+        # self.vertex_array = gl.glGenVertexArrays(1)
+        # gl.glBindVertexArray(self.vertex_array)
+        type_size = {
+            gl.GL_FLOAT: 4}
+        span = sum(
+            type_size[type_] * size
+            for type_, size, normalise in attribs)
+        offset = 0
+        for i, spec in enumerate(attribs):
+            type_, size, normalise = spec
+            normalise = (gl.GL_FALSE, gl.GL_TRUE)[normalise]
+            gl.glEnableVertexAttribArray(i)
+            # NOTE: PyOpenGL fails: "no valid context"
+            # -- https://github.com/pygame/pygame/issues/3110
+            # -- context can be 0 on wayland
+            # -- editted PyOpenGL manually to fix this for now
+            # -- might need to make a fork
+            gl.glVertexAttribPointer(
+                i,
+                size,
+                type_,
+                normalise,
+                span,
+                offset)
+            offset += type_size[type_] * size
+
+    def init_shaders(self, shaders: Dict[int, str]):
+        self.shader = gl.glCreateProgram()
+        stages = [
+            (type_, source, gl.glCreateShader(type_))
+            for type_, source in shaders.items()]
+        for type_, source, stage in stages:
+            gl.glShaderSource(stage, source)
+            gl.glCompileShader(stage)
+            compiled = gl.glGetShaderiv(stage, gl.GL_COMPILE_STATUS)
+            if compiled == gl.GL_FALSE:
+                log = gl.glGetShaderInfoLog(stage)
+                print(log)
+                raise RuntimeError(f"{type_} failed to compile!")
+            gl.glAttachShader(self.shader, stage)
+        gl.glLinkProgram(self.shader)
+        linked = gl.glGetProgramiv(self.shader, gl.GL_LINK_STATUS)
+        if linked == gl.GL_FALSE:
+            log = gl.glGetProgramInfoLog(self.shader)
+            print(log)
+            raise RuntimeError("Shader Program failed to link")
+        for type_, source, stage in stages:
+            gl.glDetachShader(self.shader, stage)
+            gl.glDeleteShader(stage)
+        # NOTE: tried gl.GetProgramBinary
+        # -- typical PyOpenGL schenanigans ensued
+
+    def draw(self) -> np.array:
+        # render 1 frame in opengl
+        # read pixels
+        # return float32 1D array
+        raise NotImplementedError()
+        gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, self.frame_buffer)
+        gl.glClearColor(0, 0, 0, 1)
+        gl.glClearDepth(1)
+        gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
+
+        gl.glUseProgram(self.shader)
+        gl.glBindVertexArray(self.vertex_array)
+        gl.glDrawElements(gl.GL_TRIANGLES, self.num_indices, gl.GL_UNSIGNED_INT, None)
+
+        gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, 0)
+        gl.glBindVertexArray(0)
+        gl.glUseProgram(0)
 
 
 class Viewer:
