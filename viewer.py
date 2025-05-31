@@ -25,22 +25,23 @@ out vec2 position;
 void main()
 {
     position = vertexPosition;
-    gl_Position = vec4(vertexPosition, 0.0, 1.0);
+    gl_Position = vec4(vertexPosition, -1.0, 1.0);
 }
 """
 
 fragment_shader = """
 #version 450 core
-out vec4 outColour;
+layout (location = 0) out vec4 outColour;
 
-in vec2 position;  // also uv
+in vec2 position;
 
 // TODO: sampler
 // TODO: texture
 
 void main()
 {
-    outColour = vec4(position, 0.0, 1.0);
+    vec2 uv = (position + 1) / 2;
+    outColour = vec4(uv, 0, 1);
 }
 """
 
@@ -72,6 +73,8 @@ class Renderer:
     vertex_buffer: int
     index_buffer: int
     shader: int
+    # metadata
+    size: bite.Size
     # texture handles
     active_texture: int
     textures: Dict[Tuple[bite.Size, int], int]
@@ -84,12 +87,16 @@ class Renderer:
         # vertices: np.array(..., dtype=np.float32)
         # attribs: [(gl.GL_FLOAT, 3, False)]
         # indices: np.array(..., dtype=np.uint32)
+        self.size = size
         glut.glutInit()
         self.window = glut.glutCreateWindow("GLUT")
         glut.glutHideWindow()
         self.print_metadata()
         # gl state
         gl.glViewport(0, 0, *size)
+        gl.glClearColor(1, 0, 1, 1)
+        # gl.glClearDepth(1)
+        gl.glFrontFace(gl.GL_CW)
         # gl objects
         self.init_framebuffer(size)
         self.init_geo(vertices, attribs, indices)
@@ -103,6 +110,7 @@ class Renderer:
         minor = gl.glGetIntegerv(gl.GL_MINOR_VERSION)
         version = gl.glGetString(gl.GL_VERSION).decode()
         print(f"version: {major}.{minor} | {version}")
+        assert major == 4 and minor >= 5, "not OpenGL 4.5 or later"
         vendor = gl.glGetString(gl.GL_VENDOR).decode()
         print(f"vendor: {vendor}")
         hardware = gl.glGetString(gl.GL_RENDERER).decode()
@@ -128,7 +136,8 @@ class Renderer:
         if len(glsl_versions) > 0:
             print(f"latest GLSL version: {glsl_versions[0]}")
 
-    def init_texture(self, size: bite.Size, format_: int, data: bytes):
+    def add_texture(self, size: bite.Size, format_: int, data: bytes):
+        raise NotImplementedError("WIP")
         # create texture
         if (size, format_) in self.textures:
             width, height = size
@@ -184,7 +193,6 @@ class Renderer:
         if status != gl.GL_FRAMEBUFFER_COMPLETE:
             # NOTE: this is bad, the GPU can't handle this config!
             raise RuntimeError(f"init_framebuffer failed: {status}")
-        gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, 0)  # unbind
 
     def init_geo(self, vertices: np.array, attribs: List[Any], indices: np.array):
         self.num_indices = indices.size
@@ -202,9 +210,7 @@ class Renderer:
             len(indices.tobytes()),
             indices,
             gl.GL_STATIC_DRAW)
-        # vertex array & attribs
-        # self.vertex_array = gl.glGenVertexArrays(1)
-        # gl.glBindVertexArray(self.vertex_array)
+        # vertex attribs
         type_size = {
             gl.GL_FLOAT: 4}
         span = sum(
@@ -219,14 +225,8 @@ class Renderer:
             # -- https://github.com/pygame/pygame/issues/3110
             # -- context can be 0 on wayland
             # -- editted PyOpenGL manually to fix this for now
-            # -- might need to make a fork
-            gl.glVertexAttribPointer(
-                i,
-                size,
-                type_,
-                normalise,
-                span,
-                offset)
+            # -- might need to make a fork / PR
+            gl.glVertexAttribPointer(i, size, type_, normalise, span, offset)
             offset += type_size[type_] * size
 
     def init_shaders(self, shaders: Dict[int, str]):
@@ -240,14 +240,14 @@ class Renderer:
             compiled = gl.glGetShaderiv(stage, gl.GL_COMPILE_STATUS)
             if compiled == gl.GL_FALSE:
                 log = gl.glGetShaderInfoLog(stage)
-                print(log)
+                print(log.decode())
                 raise RuntimeError(f"{type_} failed to compile!")
             gl.glAttachShader(self.shader, stage)
         gl.glLinkProgram(self.shader)
         linked = gl.glGetProgramiv(self.shader, gl.GL_LINK_STATUS)
         if linked == gl.GL_FALSE:
             log = gl.glGetProgramInfoLog(self.shader)
-            print(log)
+            print(log.decode())
             raise RuntimeError("Shader Program failed to link")
         for type_, source, stage in stages:
             gl.glDetachShader(self.shader, stage)
@@ -256,22 +256,27 @@ class Renderer:
         # -- typical PyOpenGL schenanigans ensued
 
     def draw(self) -> np.array:
-        # render 1 frame in opengl
-        # read pixels
-        # return float32 1D array
-        raise NotImplementedError()
-        gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, self.frame_buffer)
-        gl.glClearColor(0, 0, 0, 1)
-        gl.glClearDepth(1)
+        # TODO: can't always see triangles, only get clearcolour
+        # -- I HAVE NO IDEA WHY THIS IS HAPPENING
+        # -- need more explicit state? matricies?
+        # NOTE: can't we just copy the compressed texture to uncompressed RGBA?
+        # setup
         gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
-
+        gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, self.frame_buffer)
+        # draw
         gl.glUseProgram(self.shader)
-        gl.glBindVertexArray(self.vertex_array)
         gl.glDrawElements(gl.GL_TRIANGLES, self.num_indices, gl.GL_UNSIGNED_INT, None)
-
-        gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, 0)
-        gl.glBindVertexArray(0)
         gl.glUseProgram(0)
+        # read pixels
+        gl.glPixelStorei(gl.GL_PACK_ALIGNMENT, 1)
+        gl.glReadBuffer(gl.GL_COLOR_ATTACHMENT0)
+        pixels = gl.glReadPixels(0, 0, *self.size, gl.GL_RGB, gl.GL_UNSIGNED_BYTE)
+        # return 1D array
+        return np.frombuffer(pixels, dtype=np.uint8)
+        # NOTE: we could do mvFormat_Float_rgb
+        # -- since we're copying into a raw texture
+        # -- this doesn't work on mac, but then iirc neither does OpenGL
+        # -- RGB uint8 feeds into PIL.Image.frombytes nicely though
 
 
 class Viewer:
@@ -401,7 +406,25 @@ class Viewer:
 
 
 if __name__ == "__main__":
+    # Renderer test
+    renderer = Renderer(
+        (512, 512), {
+            gl.GL_VERTEX_SHADER: vertex_shader,
+            gl.GL_FRAGMENT_SHADER: fragment_shader},
+        np.array([-1, -1, +1, -1, +1, +1, -1, +1], dtype=np.float32),
+        [(gl.GL_FLOAT, 2, False)],
+        np.array([0, 1, 2, 0, 2, 3], dtype=np.uint32))
 
+    pixels = renderer.draw()
+
+    from PIL import Image
+    result = Image.frombytes("RGB", (512, 512), pixels.tobytes(), "raw")
+    result.save("test_render.png")
+
+    import sys
+    sys.exit(0)
+
+    # main
     imgui.create_context()
     # imgui.configure_app(manual_callback_management=True)
 

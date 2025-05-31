@@ -1,3 +1,4 @@
 dearpygui
 numpy
+Pillow
 PyOpenGL
