@@ -1,5 +1,5 @@
 __all__ = [
-    "base", "render", "utils",
+    "base", "render", "utils", "view",
     "dds", "vtf",
     "Face", "MipIndex", "Size", "Texture",
     "DDS", "VTF"]
@@ -8,6 +8,7 @@ __all__ = [
 from . import base
 from . import render
 from . import utils
+from . import view
 # texture formats (includes flag enums etc.)
 from . import dds
 from . import vtf
