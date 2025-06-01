@@ -1,11 +1,12 @@
 __all__ = [
-    "base", "utils",
+    "base", "render", "utils",
     "dds", "vtf",
     "Face", "MipIndex", "Size", "Texture",
     "DDS", "VTF"]
 
 # core
 from . import base
+from . import render
 from . import utils
 # texture formats (includes flag enums etc.)
 from . import dds
