@@ -25,7 +25,7 @@ out vec2 position;
 void main()
 {
     position = vertexPosition;
-    gl_Position = vec4(vertexPosition, -1.0, 1.0);
+    gl_Position = vec4(vertexPosition, 0.0, 1.0);
 }
 """
 
@@ -35,13 +35,12 @@ layout (location = 0) out vec4 outColour;
 
 in vec2 position;
 
-// TODO: sampler
-// TODO: texture
+uniform sampler2D texture0;
 
 void main()
 {
     vec2 uv = (position + 1) / 2;
-    outColour = vec4(uv, 0, 1);
+    outColour = texture(texture0, uv);
 }
 """
 
@@ -95,7 +94,8 @@ class Renderer:
         # gl state
         gl.glViewport(0, 0, *size)
         gl.glClearColor(1, 0, 1, 1)
-        # gl.glClearDepth(1)
+        gl.glEnable(gl.GL_DEPTH_TEST)
+        gl.glClearDepth(1)
         gl.glFrontFace(gl.GL_CW)
         # gl objects
         self.init_framebuffer(size)
@@ -136,8 +136,7 @@ class Renderer:
         if len(glsl_versions) > 0:
             print(f"latest GLSL version: {glsl_versions[0]}")
 
-    def add_texture(self, size: bite.Size, format_: int, data: bytes):
-        raise NotImplementedError("WIP")
+    def add_texture(self, size, format_, data) -> int:
         # create texture
         if (size, format_) in self.textures:
             width, height = size
@@ -151,44 +150,35 @@ class Renderer:
         # TODO: force mip level when rendering
         # -- gl.glTextureParameteri(target, gl.GL_TEXTURE_{MIN,MAX}_LOD, mip)
         # TODO: identify if format is compressed or uncompressed
-        gl.glCompressedTexImage2D(gl.GL_TEXTURE_2D, 0, format_, *size, 0, len(data), data)
+        gl.glCompressedTexImage2D(gl.GL_TEXTURE_2D, 0, format_, *size, 0, data)
         # pixelated filtering:
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_NEAREST)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_NEAREST)
         # TODO: GL_TEXTURE_WRAP_S, GL_MIRROR_CLAMP_TO_EDGE
         gl.glBindTexture(gl.GL_TEXTURE_2D, 0)  # unbind
+        return self.textures[(size, format_)]
 
     def init_framebuffer(self, size):
-        # texture to save render colour
+        # create & bind frame buffer
+        self.frame_buffer = gl.glGenFramebuffers(1)
+        gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, self.frame_buffer)
+        # colour texture
         self.render_texture = gl.glGenTextures(1)
         gl.glBindTexture(gl.GL_TEXTURE_2D, self.render_texture)
-        gl.glTexImage2D(
-            gl.GL_TEXTURE_2D,
-            0, gl.GL_RGB, *size, 0, gl.GL_RGB,
-            gl.GL_UNSIGNED_BYTE, None)
+        gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGB, *size, 0, gl.GL_RGB, gl.GL_UNSIGNED_BYTE, None)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_NEAREST)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_NEAREST)
         gl.glBindTexture(gl.GL_TEXTURE_2D, 0)  # unbind
+        # link to framebuffer
+        gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT0, gl.GL_TEXTURE_2D, self.render_texture, 0)
         # depth buffer
         self.depth_buffer = gl.glGenRenderbuffers(1)
         gl.glBindRenderbuffer(gl.GL_RENDERBUFFER, self.depth_buffer)
         gl.glRenderbufferStorage(gl.GL_RENDERBUFFER, gl.GL_DEPTH_COMPONENT, *size)
         gl.glBindRenderbuffer(gl.GL_RENDERBUFFER, 0)  # unbind
-        # colour buffer
-        self.frame_buffer = gl.glGenFramebuffers(1)
-        gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, self.frame_buffer)
-        gl.glFramebufferTexture2D(
-            gl.GL_FRAMEBUFFER,
-            gl.GL_COLOR_ATTACHMENT0,
-            gl.GL_TEXTURE_2D,
-            self.render_texture,
-            0)
-        # link it all together
-        gl.glFramebufferRenderbuffer(
-            gl.GL_FRAMEBUFFER,
-            gl.GL_DEPTH_ATTACHMENT,
-            gl.GL_RENDERBUFFER,
-            self.depth_buffer)
+        # link to framebuffer
+        gl.glFramebufferRenderbuffer(gl.GL_FRAMEBUFFER, gl.GL_DEPTH_ATTACHMENT, gl.GL_RENDERBUFFER, self.depth_buffer)
+        # confirm framebuffer is complete
         status = gl.glCheckFramebufferStatus(gl.GL_FRAMEBUFFER)
         if status != gl.GL_FRAMEBUFFER_COMPLETE:
             # NOTE: this is bad, the GPU can't handle this config!
@@ -197,19 +187,11 @@ class Renderer:
     def init_geo(self, vertices: np.array, attribs: List[Any], indices: np.array):
         self.num_indices = indices.size
         # buffer data
-        self.vertex_buffer, self.index_buffer = gl.glGenBuffers(2)
-        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, self.vertex_buffer)
-        gl.glBufferData(
-            gl.GL_ARRAY_BUFFER,
-            len(vertices.tobytes()),
-            vertices,
-            gl.GL_STATIC_DRAW)
-        gl.glBindBuffer(gl.GL_ELEMENT_ARRAY_BUFFER, self.index_buffer)
-        gl.glBufferData(
-            gl.GL_ELEMENT_ARRAY_BUFFER,
-            len(indices.tobytes()),
-            indices,
-            gl.GL_STATIC_DRAW)
+        vertex_buffer, index_buffer = gl.glGenBuffers(2)
+        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, vertex_buffer)
+        gl.glBufferData(gl.GL_ARRAY_BUFFER, len(vertices.tobytes()), vertices, gl.GL_STATIC_DRAW)
+        gl.glBindBuffer(gl.GL_ELEMENT_ARRAY_BUFFER, index_buffer)
+        gl.glBufferData(gl.GL_ELEMENT_ARRAY_BUFFER, len(indices.tobytes()), indices, gl.GL_STATIC_DRAW)
         # vertex attribs
         type_size = {
             gl.GL_FLOAT: 4}
@@ -226,7 +208,7 @@ class Renderer:
             # -- context can be 0 on wayland
             # -- editted PyOpenGL manually to fix this for now
             # -- might need to make a fork / PR
-            gl.glVertexAttribPointer(i, size, type_, normalise, span, offset)
+            gl.glVertexAttribPointer(i, size, type_, normalise, span, gl.GLvoidp(offset))
             offset += type_size[type_] * size
 
     def init_shaders(self, shaders: Dict[int, str]):
@@ -256,16 +238,12 @@ class Renderer:
         # -- typical PyOpenGL schenanigans ensued
 
     def draw(self) -> np.array:
-        # TODO: can't always see triangles, only get clearcolour
-        # -- I HAVE NO IDEA WHY THIS IS HAPPENING
-        # -- need more explicit state? matricies?
-        # NOTE: can't we just copy the compressed texture to uncompressed RGBA?
-        # setup
-        gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
         gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, self.frame_buffer)
-        # draw
+        gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
         gl.glUseProgram(self.shader)
-        gl.glDrawElements(gl.GL_TRIANGLES, self.num_indices, gl.GL_UNSIGNED_INT, None)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, self.active_texture)
+        gl.glDrawElements(gl.GL_TRIANGLES, self.num_indices, gl.GL_UNSIGNED_INT, gl.GLvoidp(0))
+        gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
         gl.glUseProgram(0)
         # read pixels
         gl.glPixelStorei(gl.GL_PACK_ALIGNMENT, 1)
@@ -414,6 +392,15 @@ if __name__ == "__main__":
         np.array([-1, -1, +1, -1, +1, +1, -1, +1], dtype=np.float32),
         [(gl.GL_FLOAT, 2, False)],
         np.array([0, 1, 2, 0, 2, 3], dtype=np.uint32))
+
+    dds = bite.DDS.from_file(os.path.join(
+        "/home/bikkie/drives/ssd1/Mod/",
+        "ApexLegends/Projects/Cubemaps/",
+        "cubemaps_hdr.dds"))
+
+    texture_bytes = dds.mipmaps[bite.MipIndex(0, 0, bite.Face(0))]
+    # np.array(list(texture_bytes), dtype=np.uint8))
+    renderer.active_texture = renderer.add_texture(dds.size, 0x8E8F, texture_bytes)
 
     pixels = renderer.draw()
 
