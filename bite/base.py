@@ -32,8 +32,8 @@ class MipIndex:
 
     def __repr__(self) -> str:
         args = [
-            f"mip={self.mip}",
-            f"frame={self.frame}"]
+            f"mip={self.mip!r}",
+            f"frame={self.frame!r}"]
         if self.face is not None:
             args.append(f"face=Face.{self.face.name}")
         return f"{self.__class__.__name__}({', '.join(args)})"
