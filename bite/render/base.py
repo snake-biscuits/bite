@@ -1,14 +1,14 @@
 # https://gist.github.com/leon-nn/cd4e3d50eb0fa23d8e197102f49f2cb3
+# https://learnopengl.com
 import enum
-# import os
-from typing import Any, Dict, List, Tuple
+import os
 
 import numpy as np
 from OpenGL.error import GLError
 import OpenGL.GL as gl
 import OpenGL.GLUT as glut
 
-from ..base import Size
+from ..base import Face, MipIndex, Texture
 from .. import dds
 from .. import vtf
 
@@ -23,54 +23,53 @@ class BPTC(enum.Enum):
     UNSIGNED_FLOAT = 0x8E8F  # COMPRESSED_RGB_BPTC_UNSIGNED_FLOAT_ARB
 
 
-internal_format = {
-    ".dds": {
-        dds.DXGI.BC6H_UF16: (BPTC.UNSIGNED_FLOAT.value, True)},
-    ".vtf": {
-        vtf.Format.BC6H_UF16: (BPTC.UNSIGNED_FLOAT.value, True)}}
-# ^ {".ext": {texture.format: (gl_format, is_compressed)}}
+def internal_format(texture: Texture) -> (int, bool):
+    format_for = {
+        "dds": {
+            dds.DXGI.BC6H_UF16: (BPTC.UNSIGNED_FLOAT.value, True)},
+        "vtf": {
+            vtf.Format.BC6H_UF16: (BPTC.UNSIGNED_FLOAT.value, True)}}
+    # ^ {"ext": {texture.format: (gl_format, is_compressed)}}
+    return format_for[texture.extension][texture.format]
 
 
 class Renderer:
-    # core handles
+    texture: Texture
+    num_indices: int  # for glDrawElements
+    # GL / GLUT handles
     window: int
-    vertex_buffer: int
+    # geo
     index_buffer: int
+    vertex_buffer: int
+    # rendering
+    gl_texture: int
     shader: int
-    # metadata
-    size: Size
-    # texture handles
-    active_texture: int
-    textures: Dict[Tuple[Size, int], int]
-    # ^ {((width, height), format_): handle}
+    # framebuffer
+    depth_buffer: int
+    frame_buffer: int
+    render_texture: int  # framebuffer RGB output
 
-    def __init__(self, size, shaders, vertices, attribs, indices):
-        # size: bite.Size
-        # shaders: Dict[int, str]
-        # ^ {gl.GL_VERTEX_SHADER: "vertex shader text"}
-        # vertices: np.array(..., dtype=np.float32)
-        # attribs: [(gl.GL_FLOAT, 3, False)]
-        # indices: np.array(..., dtype=np.uint32)
-        self.size = size
+    def __init__(self, texture: Texture):
+        self.texture = texture
+        # setup gl context
         glut.glutInit()
         self.window = glut.glutCreateWindow("GLUT")
         glut.glutHideWindow()
-        self.print_metadata()
-        # gl state
-        gl.glViewport(0, 0, *size)
+        # check OpenGL & GLSL versions + extensions
+        self.check_context()
+        # basic gl config
+        gl.glViewport(0, 0, *self.texture.size)
         gl.glClearColor(1, 0, 1, 1)
         gl.glEnable(gl.GL_DEPTH_TEST)
         gl.glClearDepth(1)
         gl.glFrontFace(gl.GL_CW)
-        # gl objects
-        self.init_framebuffer(size)
-        self.init_geo(vertices, attribs, indices)
-        self.init_shaders(shaders)
-        # NOTE: user should add textures & set active texture before rendering
-        self.textures = dict()
-        self.active_texture = 0  # unbind
+        # complex gl config
+        self.init_framebuffer()
+        self.init_geo()
+        self.init_shaders()
+        self.init_texture()
 
-    def print_metadata(self):
+    def check_context(self):
         major = gl.glGetIntegerv(gl.GL_MAJOR_VERSION)
         minor = gl.glGetIntegerv(gl.GL_MINOR_VERSION)
         version = gl.glGetString(gl.GL_VERSION).decode()
@@ -90,8 +89,7 @@ class Renderer:
         i = 0
         while True:
             try:
-                glsl_versions.append(gl.glGetStringi(
-                    gl.GL_SHADING_LANGUAGE_VERSION, i).decode())
+                glsl_versions.append(gl.glGetStringi(gl.GL_SHADING_LANGUAGE_VERSION, i).decode())
                 i += 1
             except GLError:
                 break  # INVALID_ENUM; reached last version
@@ -101,30 +99,29 @@ class Renderer:
         print(f"{len(glsl_versions)} GLSL versions available")
         if len(glsl_versions) > 0:
             print(f"latest GLSL version: {glsl_versions[0]}")
+        assert "450" in glsl_versions, "GLSL 4.50 unsupported"
 
-    def add_texture(self, size, format_, data) -> int:
-        # create texture
-        if (size, format_) in self.textures:
-            width, height = size
-            # NOTE: format will be an int, we can't preserve the name here
-            raise RuntimeError(f"already have a {width}x{height} ({format_}) texture")
-        self.textures[(size, format_)] = gl.glGenTextures(1)
-        gl.glBindTexture(gl.GL_TEXTURE_2D, self.textures[(size, format_)])
+    def init_texture(self):
+        self.gl_texture = gl.glGenTextures(1)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, self.gl_texture)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP_TO_EDGE)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP_TO_EDGE)
         # add data
+        size = self.texture.size
+        format_, is_compressed = internal_format(self.texture)
+        data = self.texture.mipmaps[MipIndex(0, 0, Face(0))]
         # TODO: cubemap faces
         # -- gl.GL_TEXTURE_CUBE_MAP_{POSI,NEGA}TIVE_{X,Y,Z}
-        # TODO: force mip level when rendering
-        # -- gl.glTextureParameteri(target, gl.GL_TEXTURE_{MIN,MAX}_LOD, mip)
-        # TODO: identify if format is compressed or uncompressed
-        gl.glCompressedTexImage2D(gl.GL_TEXTURE_2D, 0, format_, *size, 0, data)
-        # pixelated filtering:
-        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_NEAREST)
-        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_NEAREST)
-        # TODO: GL_TEXTURE_WRAP_S, GL_MIRROR_CLAMP_TO_EDGE
-        gl.glBindTexture(gl.GL_TEXTURE_2D, 0)  # unbind
-        return self.textures[(size, format_)]
+        if is_compressed:
+            # TODO: copy all mips
+            gl.glCompressedTexImage2D(gl.GL_TEXTURE_2D, 0, format_, *size, 0, data)
+        # unbind
+        gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
 
-    def init_framebuffer(self, size):
+    def init_framebuffer(self):
+        size = self.texture.size
         # create & bind frame buffer
         self.frame_buffer = gl.glGenFramebuffers(1)
         gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, self.frame_buffer)
@@ -150,7 +147,12 @@ class Renderer:
             # NOTE: this is bad, the GPU can't handle this config!
             raise RuntimeError(f"init_framebuffer failed: {status}")
 
-    def init_geo(self, vertices: np.array, attribs: List[Any], indices: np.array):
+    def init_geo(self):
+        # hardcoded fullscreen quad
+        vertices = np.array(
+            [-1, -1, +1, -1, +1, +1, -1, +1], dtype=np.float32)
+        attribs = [(gl.GL_FLOAT, 2, False)]
+        indices = np.array([0, 1, 2, 0, 2, 3], dtype=np.uint32)
         self.num_indices = indices.size
         # buffer data
         vertex_buffer, index_buffer = gl.glGenBuffers(2)
@@ -177,7 +179,17 @@ class Renderer:
             gl.glVertexAttribPointer(i, size, type_, normalise, span, gl.GLvoidp(offset))
             offset += type_size[type_] * size
 
-    def init_shaders(self, shaders: Dict[int, str]):
+    def init_shaders(self):
+        # load shader files
+        shader_dir = os.path.join(os.path.dirname(__file__), "shaders")
+        with open(os.path.join(shader_dir, "basic.vertex.glsl")) as glsl_file:
+            vertex_shader = glsl_file.read()
+        with open(os.path.join(shader_dir, "basic.fragment.glsl")) as glsl_file:
+            fragment_shader = glsl_file.read()
+        shaders = {
+            gl.GL_VERTEX_SHADER: vertex_shader,
+            gl.GL_FRAGMENT_SHADER: fragment_shader}
+        # gl setup
         self.shader = gl.glCreateProgram()
         stages = [
             (type_, source, gl.glCreateShader(type_))
@@ -200,20 +212,22 @@ class Renderer:
         for type_, source, stage in stages:
             gl.glDetachShader(self.shader, stage)
             gl.glDeleteShader(stage)
-        # NOTE: tried gl.GetProgramBinary
+        # NOTE: tried gl.glGetProgramBinary
         # -- typical PyOpenGL schenanigans ensued
 
     def draw(self) -> np.array:
         gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, self.frame_buffer)
         gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
         gl.glUseProgram(self.shader)
-        gl.glBindTexture(gl.GL_TEXTURE_2D, self.active_texture)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, self.gl_texture)
+        # TODO: force mip level when rendering
+        # -- gl.glTextureParameteri(target, gl.GL_TEXTURE_{MIN,MAX}_LOD, mip)
         gl.glDrawElements(gl.GL_TRIANGLES, self.num_indices, gl.GL_UNSIGNED_INT, gl.GLvoidp(0))
         gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
         gl.glUseProgram(0)
         # read pixels
         gl.glPixelStorei(gl.GL_PACK_ALIGNMENT, 1)
         gl.glReadBuffer(gl.GL_COLOR_ATTACHMENT0)
-        pixels = gl.glReadPixels(0, 0, *self.size, gl.GL_RGB, gl.GL_UNSIGNED_BYTE)
+        pixels = gl.glReadPixels(0, 0, *self.texture.size, gl.GL_RGB, gl.GL_UNSIGNED_BYTE)
         # return 1D array
         return np.frombuffer(pixels, dtype=np.uint8)
