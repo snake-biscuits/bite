@@ -1,4 +1,5 @@
 import os
+import sys
 
 import numpy as np
 import OpenGL.GL as gl
@@ -30,8 +31,14 @@ dds = DDS.from_file(os.path.join(
     "ApexLegends/Projects/Cubemaps/",
     "cubemaps_hdr.dds"))
 
+if len(sys.argv) != 2:
+    print(f"USAGE: {sys.argv[0]} cubemap_index")
+    sys.exit(0)
+
+i = int(sys.argv[1])
+
 # NOTE: add_texture doesn't take into account mip_level, yet.
-texture_bytes = dds.mipmaps[MipIndex(0, 3, Face(3))]
+texture_bytes = dds.mipmaps[MipIndex(0, i, Face(3))]
 renderer.active_texture = renderer.add_texture(dds.size, 0x8E8F, texture_bytes)
 
 pixels = renderer.draw()
