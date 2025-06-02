@@ -1,19 +1,21 @@
 # https://dearpygui.readthedocs.io/en/latest/documentation/
 # https://gist.github.com/leon-nn/cd4e3d50eb0fa23d8e197102f49f2cb3
 import os
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List
 
 import dearpygui.dearpygui as imgui
 import numpy as np
 
 from .base import Face, MipIndex, Size, Texture
 from .dds import DDS
-from .vtf import Flags as vtf_Flags
 from .vtf import VTF
 
 
-TextureScope = Tuple[int, int, bool]
-# ^ (num_mipmaps, num_frames, is_cubemap)
+def rgb_to_rgba(rgb: bytes) -> bytes:
+    rgb_array = np.frombuffer(rgb, dtype=np.uint8)
+    rgb_pixels = rgb_array.reshape(rgb_array.size // 3, 3)
+    rgba = np.insert(rgb_pixels, 3, 0xFF, axis=1).flatten()
+    return rgba.tobytes()
 
 
 class Viewer:
@@ -37,16 +39,17 @@ class Viewer:
             self.texture = DDS.from_file(path)
         else:
             raise RuntimeError(f"Unknown Extension: {ext!r}")
-        # reset self.index
-        num_mips, num_frames, is_cubemap = self.scope()
-        if is_cubemap:
+        if self.texture.raw_data is not None:
+            raise RuntimeError(f"Unsupported Format: {self.texture.format}")
+        # set default self.index
+        if self.texture.is_cubemap:
             self.index = MipIndex(0, 0, Face(0))
         else:
             self.index = MipIndex(0, 0, None)
         # raw textures
         self.texture_tags = list()
         with imgui.texture_registry(show=False):
-            for mip in range(num_mips):
+            for mip in range(self.texture.num_mipmaps):
                 width, height = self.mip_size(mip)
                 texture_floats = (np.frombuffer(
                     b"\xFF\x00\xFF\xFF" * width * height,
@@ -56,19 +59,20 @@ class Viewer:
                     default_value=texture_floats,
                     format=imgui.mvFormat_Float_rgba))
         # create viewer window
-        num_mipmaps, num_frames, is_cubemap = self.scope()
         with imgui.child_window(parent=parent):
             with imgui.group(horizontal=True):
                 with imgui.group(width=192):
                     self.mip_tag = imgui.add_slider_int(
                         label="Mip Level",
-                        min_value=0, max_value=num_mipmaps - 1,
+                        min_value=0,
+                        max_value=self.texture.num_mipmaps - 1,
                         callback=self.mip_callback)
                     self.frame_tag = imgui.add_slider_int(
                         label="Frame",
-                        min_value=0, max_value=num_frames - 1,
+                        min_value=0,
+                        max_value=self.texture.num_frames - 1,
                         callback=self.frame_callback)
-                    if is_cubemap:
+                    if self.texture.is_cubemap:
                         self.face_tag = imgui.add_slider_int(
                             label="Cubemap Face",
                             min_value=0, max_value=5,
@@ -101,23 +105,6 @@ class Viewer:
             self.preview_tag,
             texture_tag=self.texture_tags[mip])
 
-    def scope(self) -> TextureScope:
-        if self.texture is None:
-            return (0, 0, None)
-        elif isinstance(self.texture, DDS):
-            dds = self.texture
-            if dds.resource_dimension == 3:
-                return (dds.num_mipmaps, dds.array_size // 6, True)
-            else:
-                return (dds.num_mipmaps, dds.array_size, False)
-        elif isinstance(self.texture, VTF):
-            vtf = self.texture
-            is_cubemap = vtf_Flags.ENVMAP in vtf.flags
-            return (vtf.num_mipmaps, vtf.num_frames, is_cubemap)
-        else:
-            raise NotImplementedError(
-                "Unsupported Texture class: {type(self.texture)}")
-
     # callbacks
     def mip_callback(self):
         mip, frame, face = self.index
@@ -133,7 +120,7 @@ class Viewer:
 
     def face_callback(self):
         mip, frame, face = self.index
-        if self.scope()[-1]:  # is_cubemap
+        if self.texture.is_cubemap:
             face_index = imgui.get_value(self.face_tag)
             face = Face(face_index)
         else:  # force to None, just in case

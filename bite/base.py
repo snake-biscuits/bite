@@ -60,6 +60,8 @@ class Texture:
     mipmaps: Dict[MipIndex, bytes]
     # ^ {MipIndex(mip, frame, face): b"raw_mipmap"}
     raw_data: Union[None, bytes]  # for when mips cannot be split
+    # NOTE: texture should have (num_mipmaps, num_frames, is_cubemap)
+    # -- this defines the full range of possible mipmaps keys
 
     def __init__(self):
         self.folder = ""

@@ -27,6 +27,9 @@ class DDS(base.Texture):
     mipmaps: Dict[Tuple[int, int, int], bytes]
     # ^ {(mip_index, cubemap_index, side_index): raw_mipmap_data}
     raw_data: Union[bytes, None]  # if mipmaps cannot be split
+    # properties
+    is_cubemap: bool
+    num_frames: int
 
     def __init__(self):
         super().__init__()
@@ -60,6 +63,17 @@ class DDS(base.Texture):
             child.mipmaps = self.mipmaps[start:end]
             child.save_as(f"{base_filename}.{i}.dds")
 
+    @property
+    def is_cubemap(self) -> bool:
+        return self.resource_dimension == 3
+
+    @property
+    def num_frames(self) -> int:
+        if self.is_cubemap:
+            return self.array_size // 6
+        else:
+            return self.array_size
+
     @classmethod
     def from_stream(cls, stream: io.BytesIO) -> DDS:
         out = cls()
@@ -86,12 +100,11 @@ class DDS(base.Texture):
             mip_sizes = [
                 max(1 << i, 4) ** 2
                 for i in reversed(range(out.num_mipmaps))]
-            if out.resource_dimension == 3:  # cubemap array
+            if out.is_cubemap:
                 assert out.array_size % 6 == 0
-                num_frames = out.array_size // 6
                 out.mipmaps = {
                     base.MipIndex(mip, frame, face): stream.read(mip_size)
-                    for frame in range(num_frames)
+                    for frame in range(out.num_frames)
                     for face in base.Face
                     for mip, mip_size in enumerate(mip_sizes)}
             else:

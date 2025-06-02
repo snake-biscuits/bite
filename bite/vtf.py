@@ -129,10 +129,13 @@ class VTF(base.Texture):
     low_res_size: base.Size
     resources: List[Resource]
     cma: Union[None, CMA]
-    # data
+    # pixel data
     mipmaps: Dict[base.MipIndex, bytes]
     # ^ {MipIndex(mip, frame, face): b"raw_mipmap"}
     raw_data: Union[None, bytes]
+    # properties
+    as_json: Dict[str, Any]
+    is_cubemap: bool
 
     def __init__(self):
         super().__init__()
@@ -235,6 +238,10 @@ class VTF(base.Texture):
             "mipmap_depth": self.mipmap_depth,
             "resources": {k: str(v) for k, v in self.resources.items()},
             "cma": self.cma.as_json if self.cma is not None else None}
+
+    @property
+    def is_cubemap(self) -> bool:
+        return Flags.ENVMAP in self.flags
 
     def as_bytes(self) -> bytes:
         stream = io.BytesIO()
