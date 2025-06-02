@@ -1,0 +1,71 @@
+[project]
+name = "bite"
+version = "0.1.0"
+description = "Python library for parsing textures and materials"
+readme = "README.md"
+requires-python=">=3.8"
+license = {file = "LICENSE.txt"}
+keywords = ["texture", "dds", "vtf"]
+
+authors = [
+    {name="snake-biscuits", email="bikkie.dev@gmx.com"}
+]
+
+maintainers = [
+    {name="snake-biscuits", email="bikkie.dev@gmx.com"}
+]
+
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Software Development :: Libraries :: Python Modules"
+]
+
+dependencies = [
+]
+
+
+[project.optional-dependencies]
+# TODO: continue to function without `view` & `render`
+viewer = [
+    "dearpygui",
+    "numpy",
+    "Pillow",
+    "PyOpenGL"
+]
+
+
+[project.urls]
+"Homepage" = "https://github.com/snake-biscuits/bite"
+"Repository" = "https://github.com/snake-biscuits/bite"
+# "Changelog" = "https://github.com/snake-biscuits/bite/blob/main/CHANGELOG.md"
+"Bug Reports" = "https://github.com/snake-biscuits/bite/issue"
+"Funding" = "https://ko-fi.com/bikkie"
+
+
+[build-system]
+requires = ["hatchling >= 1.13"]
+build-backend = "hatchling.build"
+
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/bite/*",
+#     "/CHANGELOG.md",
+]
+# TODO: shaders
+
+
+[tool.hatch.build.targets.wheel]
+only-packages = true
+
