@@ -2,7 +2,7 @@
 from __future__ import annotations
 import enum
 import io
-from typing import Dict, Tuple, Union
+from typing import Dict, Union
 
 from . import base
 from .utils import read_struct, write_struct
@@ -14,6 +14,7 @@ class DXGI(enum.Enum):
 
 class DDS(base.Texture):
     extension: str = "dds"
+    folder: str
     filename: str
     # header
     size: base.Size
@@ -24,8 +25,8 @@ class DDS(base.Texture):
     misc_flag: int  # TODO: enum
     array_size: int
     # pixel data
-    mipmaps: Dict[Tuple[int, int, int], bytes]
-    # ^ {(mip_index, cubemap_index, side_index): raw_mipmap_data}
+    mipmaps: Dict[base.MipIndex, bytes]
+    # ^ {MipIndex(mip, frame, face): raw_mipmap_data}
     raw_data: Union[bytes, None]  # if mipmaps cannot be split
     # properties
     is_cubemap: bool
