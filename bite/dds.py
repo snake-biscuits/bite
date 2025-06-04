@@ -110,13 +110,12 @@ class DDS(base.Texture):
                     for mip, mip_size in enumerate(mip_sizes)}
             else:
                 out.mipmaps = {
-                    base.MipIndex(mip, frame): stream.read(mip_size)
+                    base.MipIndex(mip, frame, None): stream.read(mip_size)
                     for frame in out.array_size
                     for mip, mip_size in enumerate(mip_sizes)}
         else:
             # TODO: UserWarning("unknown pixel format, could not parse mips")
             out.raw_data = stream.read()
-            return out
         return out
 
     def as_bytes(self) -> bytes:
