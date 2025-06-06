@@ -43,6 +43,45 @@ class Format(enum.Enum):
     BC6H_UF16 = 66  # r2 / r5 cubemaps.hdr.vtf only
 
 
+bytes_per_pixel = {
+    Format.RGBA_8888: 32,
+    Format.ABGR_8888: 32,
+    Format.RGB_888: 24,
+    Format.BGR_888: 24,
+    Format.RGB_565: 16,
+    Format.I8: 8,
+    Format.IA_88: 16,
+    Format.P_8: 8,
+    Format.A_8: 8,
+    Format.RGB_888_BLUESCREEN: 24,
+    Format.BGR_888_BLUESCREEN: 24,
+    Format.ARGB_8888: 32,
+    Format.BGRA_8888: 32,
+    Format.DXT1: 0.5,  # 8 bytes, 4x4 pixels
+    Format.DXT3: ...,
+    Format.DXT5: ...,
+    Format.BGRX_8888: 32,
+    Format.BGR_565: 16,
+    Format.BGRX_5551: 16,
+    Format.BGRA_4444: 16,
+    Format.DXT1_ONE_BIT_ALPHA: ...,
+    Format.BGRA_5551: 16,
+    Format.UV_88: 16,
+    Format.UVWQ_8888: 32,
+    Format.RGBA_16161616F: 64,
+    Format.RGBA_16161616: 64,
+    Format.UVLX_8888: 32,
+    Format.BC6H_UF16: 1}
+
+
+min_block_size = {
+    Format.DXT1: 8,  # 4 byte palette + 4 byte indices
+    Format.DXT3: ...,
+    Format.DXT5: ...,
+    Format.DXT1_ONE_BIT_ALPHA: ...,
+    Format.BC6H_UF16: 16}
+
+
 class Flags(enum.IntFlag):
     POINT_SAMPLE = 0x00000001
     TRILINEAR = 0x00000002
