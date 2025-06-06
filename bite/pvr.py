@@ -31,7 +31,7 @@ class TextureMode(enum.Enum):
     PAL_8 = 0x07
     PAL_8_MIPS = 0x08
     RECTANGLE = 0x09
-    STRIDE = 0xB
+    STRIDE = 0x0B
     TWIDDLED_RECTANGLE = 0x0D
     SMALL_VQ = 0x10
     SMALL_VQ_MIPS = 0x11

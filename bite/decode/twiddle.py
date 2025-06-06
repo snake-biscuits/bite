@@ -80,7 +80,7 @@ def detwiddle_lut(width: int, height: int) -> List[int]:
         for y in column]
 
 
-def decode(texture: Texture, mip_index: MipIndex = None):
+def TWIDDLED_to_ORDERED(texture: Texture, mip_index: MipIndex = None) -> bytes:
     assert isinstance(texture, pvr.PVR)
 
     if mip_index is None:

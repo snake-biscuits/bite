@@ -32,19 +32,19 @@ classifiers = [
 ]
 
 dependencies = [
+    "numpy"
 ]
 
 
 [project.optional-dependencies]
+# NOTE: installing dependencies will unlock functionality
+# -- no reinstall required
 # imgui texture viewer w/ OpenGL backend
 viewer = [
     "dearpygui",
-    "numpy",
     "Pillow",
     "PyOpenGL"
 ]
-# texture decoding on the CPU w/ numpy
-decode = ["numpy"]
 
 
 [project.urls]
