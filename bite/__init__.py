@@ -20,6 +20,7 @@ from .vtf import VTF
 
 # extras
 import importlib.util
+
 # viewer
 if all(importlib.util.find_spec(dependency) is not None
        for dependency in ("OpenGL", "numpy", "dearpygui")):
@@ -27,3 +28,9 @@ if all(importlib.util.find_spec(dependency) is not None
     from . import view  # noqa F401
 
     __all__.extend(["render", "view"])
+
+# decode
+if importlib.util.find_spec("numpy") is not None:
+    from . import decode  # noqa F401
+
+    __all__.append("decode")

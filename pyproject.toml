@@ -5,7 +5,7 @@ description = "Python library for parsing textures and materials"
 readme = "README.md"
 requires-python=">=3.8"
 license = {file = "LICENSE.txt"}
-keywords = ["texture", "dds", "vtf"]
+keywords = ["texture", "dds", "vtf", "pvr"]
 
 authors = [
     {name="snake-biscuits", email="bikkie.dev@gmx.com"}
@@ -36,13 +36,15 @@ dependencies = [
 
 
 [project.optional-dependencies]
-# TODO: continue to function without `view` & `render`
+# imgui texture viewer w/ OpenGL backend
 viewer = [
     "dearpygui",
     "numpy",
     "Pillow",
     "PyOpenGL"
 ]
+# texture decoding on the CPU w/ numpy
+decode = ["numpy"]
 
 
 [project.urls]
@@ -63,9 +65,9 @@ include = [
     "/bite/*",
 #     "/CHANGELOG.md",
 ]
-# TODO: shaders
+# TODO: shaders for viewer
+# -- "/bite/render/shaders/*/*.glsl"
 
 
 [tool.hatch.build.targets.wheel]
 only-packages = true
-
