@@ -56,12 +56,16 @@ class Texture:
     filename: str
     # header
     size: Tuple[int, int]  # dimensions of largest mipmap
+    num_mipmaps: int
+    num_frames: int
     # data
     mipmaps: Dict[MipIndex, bytes]
     # ^ {MipIndex(mip, frame, face): b"raw_mipmap"}
     raw_data: Union[None, bytes]  # for when mips cannot be split
     # NOTE: texture should have (num_mipmaps, num_frames, is_cubemap)
     # -- this defines the full range of possible mipmaps keys
+    # properties
+    is_cubemap: bool
 
     def __init__(self):
         self.folder = ""
@@ -69,12 +73,18 @@ class Texture:
         self.mipmaps = dict()
         self.raw_data = None
         self.size = (0, 0)
+        self.num_mipmaps = 0
+        self.num_frames = 0
 
     def __repr__(self) -> str:
         width, height = self.size
         size = "{width}x{height}"
         descriptor = f"'{self.filename}' {size} {len(self.mipmaps)} mipmaps"
         return f"<{self.__class__.__name__} {descriptor} @ 0x{id(self):016X}>"
+
+    @property
+    def is_cubemap(self):
+        raise NotImplementedError()
 
     # read
     @classmethod

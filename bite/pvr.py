@@ -77,6 +77,8 @@ class PVR(base.Texture):
     raw_data: Union[bytes, None]  # if mipmaps cannot be split
     # properties
     is_cubemap: bool
+    num_mipmaps: int
+    num_frames: int
 
     def __init__(self):
         super().__init__()
@@ -108,14 +110,17 @@ class PVR(base.Texture):
         assert read_struct(stream, "H") == 0  # padding
         out.size = read_struct(stream, "2H")
         # pixel data
+        out.num_frames = 1
         if out.format.texture.name.endswith("_MIPS"):
             # TODO: mip_sizes tables by pixel format
+            out.num_mipmaps = ...
             mip_sizes = list()
             out.mipmaps = {
                 base.MipIndex(mip, frame, None): stream.read(mip_size)
                 for frame in out.array_size
                 for mip, mip_size in enumerate(mip_sizes)}
         else:
+            out.num_mipmaps = 1
             out.mipmaps[base.MipIndex(0, 0, None)] = stream.read()
         return out
 
