@@ -75,6 +75,10 @@ class DDS(base.Texture):
         else:
             return self.array_size
 
+    @num_frames.setter
+    def num_frames(self, value: int):
+        pass
+
     @classmethod
     def from_stream(cls, stream: io.BytesIO) -> DDS:
         out = cls()
