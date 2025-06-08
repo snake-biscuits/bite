@@ -2,7 +2,8 @@
 from __future__ import annotations
 import enum
 import io
-from typing import Dict, Union
+import os
+from typing import Dict, List, Union
 
 from . import base
 from .utils import read_struct, write_struct
@@ -46,23 +47,37 @@ class DDS(base.Texture):
         size = f"{width}x{height}"
         return f"<DDS '{self.filename}' {size} {self.format.name}>"
 
-    # TODO: return List[DDS] instead of using .save_as()
-    def split(self):
+    def split(self) -> List[DDS]:
         """separate a cubemap array into multiple files"""
-        assert self.filename.endswith(".dds")
-        base_filename = self.filename[:-4]
-        for i in range(self.array_size):
+        # TODO: options for how to split
+        # TODO: make header copying universal
+        # -- then we could move this method to base.Texture
+        out = list()
+        base_filename = os.path.splitext(self.filename)[0]
+        is_cubemap = self.is_cubemap
+        for i in range(self.num_frames):
             child = DDS()
-            child.array_size = 1
+            child.array_size = 6 if is_cubemap else 1
+            child.filename = f"{base_filename}.{i}.dds"
             child.format = self.format
             child.misc_flag = self.misc_flag
             child.num_mipmaps = self.num_mipmaps
             child.resource_dimension = self.resource_dimension
             child.size = self.size
-            start = i * self.num_mipmaps
-            end = (i + 1) * self.num_mipmaps
-            child.mipmaps = self.mipmaps[start:end]
-            child.save_as(f"{base_filename}.{i}.dds")
+            if is_cubemap:
+                indices = {
+                    (mip, face): base.MipIndex(mip, i, base.Face(face))
+                    for mip in range(self.num_mipmaps)
+                    for face in range(6)}
+            else:
+                indices = {
+                    (mip, None): base.MipIndex(mip, i, None)
+                    for mip in range(self.num_mipmaps)}
+            child.mipmaps = {
+                base.MipIndex(mip, 0, face): self.mipmaps[index]
+                for (mip, face), index in indices.items()}
+            out.append(child)
+        return out
 
     @property
     def is_cubemap(self) -> bool:
