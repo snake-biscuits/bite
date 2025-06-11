@@ -76,7 +76,7 @@ class PVR(base.Texture):
     # ^ {(mip_index, cubemap_index, side_index): b"raw_mipmap"}
     raw_data: Union[bytes, None]  # if mipmaps cannot be split
     # properties
-    is_cubemap: bool
+    is_cubemap: bool = property(lambda s: False)
     num_mipmaps: int
     num_frames: int
 
@@ -87,7 +87,6 @@ class PVR(base.Texture):
         self.version = (0, 0)
         self.data_size = 0
         self.format = Format(PixelMode(0), TextureMode(1))
-        self.is_cubemap = False
 
     def __repr__(self) -> str:
         width, height = self.size
