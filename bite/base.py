@@ -39,6 +39,13 @@ class Material:
         self.is_transparent = False
         self.textures = dict()
 
+    def __repr__(self) -> str:
+        descriptor = " ".join([
+            f"'{self.filename}'",
+            f"{self.shader}",
+            f"{len(self.textures)} textures"])
+        return f"<{self.__class__.__name__} {descriptor} @ 0x{id(self):016X}>"
+
     # read
     @classmethod
     def from_bytes(cls, raw_data: bytes) -> Material:
