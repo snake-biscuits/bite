@@ -2,7 +2,7 @@ from __future__ import annotations
 import enum
 import io
 import os
-from typing import Dict, Tuple, Union
+from typing import Dict, List, Tuple, Union
 
 
 Size = Tuple[int, int]
@@ -18,6 +18,66 @@ class Face(enum.Enum):
     DOWN = 3  # Y-
     FRONT = 4  # Z+
     BACK = 5  # Z-
+
+
+class Material:
+    is_text_based: bool = True
+    extension: str = "ext"
+    folder: str
+    filename: str
+    # metadata
+    shader: str
+    is_transparent: bool
+    # data
+    textures: Dict[str, str]
+    # ^ {"role": "path"}
+
+    def __init__(self):
+        self.folder = ""
+        self.filename = f"untitled.{self.extension}"
+        self.shader = None
+        self.is_transparent = False
+        self.textures = dict()
+
+    # read
+    @classmethod
+    def from_bytes(cls, raw_data: bytes) -> Material:
+        return cls.from_stream(io.BytesIO(raw_data))
+
+    @classmethod
+    def from_file(cls, path: str) -> Material:
+        if cls.is_text_based:
+            with open(path, "r") as txt_file:
+                out = cls.from_lines(txt_file.readlines())
+        else:
+            with open(path, "rb") as bin_file:
+                out = cls.from_stream(bin_file)
+        out.folder, out.filename = os.path.split(path)
+        return out
+
+    @classmethod
+    def from_lines(cls, lines: List[str]) -> Material:
+        raise NotImplementedError()
+
+    @classmethod
+    def from_stream(cls, stream: io.BytesIO) -> Material:
+        raise NotImplementedError()
+
+    # write
+    # TODO: as_lines if cls.is_text_based
+    def as_bytes(self) -> bytes:
+        raise NotImplementedError()
+
+    def save(self):
+        path = os.path.join(self.folder, self.filename)
+        self.save_as(path)
+
+    def save_as(self, path: str):
+        out = self.as_bytes()
+        folder = os.path.dirname(path)
+        os.makedirs(folder, exist_ok=True)
+        with open(path, "wb") as texture_file:
+            texture_file.write(out)
 
 
 class MipIndex:

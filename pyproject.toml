@@ -51,7 +51,7 @@ viewer = [
 "Homepage" = "https://github.com/snake-biscuits/bite"
 "Repository" = "https://github.com/snake-biscuits/bite"
 # "Changelog" = "https://github.com/snake-biscuits/bite/blob/main/CHANGELOG.md"
-"Bug Reports" = "https://github.com/snake-biscuits/bite/issue"
+"Bug Reports" = "https://github.com/snake-biscuits/bite/issues"
 "Funding" = "https://ko-fi.com/bikkie"
 
 
