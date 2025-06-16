@@ -10,7 +10,60 @@ from .utils import read_struct, write_struct
 
 
 class DXGI(enum.Enum):
-    BC6H_UF16 = 0x5F  # the only format we care about
+    UNKNOWN = 0x00
+    RGBA_32323232_TYPELESS = 0x01
+    RGBA_32323232_FLOAT = 0x02
+    RGBA_32323232_UINT = 0x03
+    RGBA_32323232_SINT = 0x04
+    RGB_323232_TYPELESS = 0x05
+    RGB_323232_FLOAT = 0x06
+    RGB_323232_UINT = 0x07
+    RGB_323232_SINT = 0x08
+    RGBA_16161616_TYPELESS = 0x09
+    RGBA_16161616_FLOAT = 0x0A
+    RGBA_16161616_UNORM = 0x0B
+    RGBA_16161616_UINT = 0x0C
+    RGBA_16161616_SNORM = 0x0D
+    RGBA_16161616_SINT = 0x0E
+    RG_3232_TYPELESS = 0x0F
+    RG_3232_FLOAT = 0x10
+    RG_3232_UINT = 0x11
+    RG_3232_SINT = 0x12
+    ...
+    # S3TC / DXTn / BCn
+    BC1_TYPELESS = 0x46
+    BC1_UNORM = 0x47
+    BC1_UNORM_SRGB = 0x48
+    BC2_TYPELESS = 0x49
+    BC2_UNORM = 0x4A
+    BC2_UNORM_SRGB = 0x4B
+    BC3_TYPELESS = 0x4C
+    BC3_UNORM = 0x4D
+    BC3_UNORM_SRGB = 0x4E
+    BC4_TYPELESS = 0x4F
+    BC4_UNORM = 0x50
+    BC4_SNORM = 0x51
+    BC5_TYPELESS = 0x52
+    BC5_UNORM = 0x53
+    BC5_SNORM = 0x54
+    # uncompressed
+    BGR_565_UNORM = 0x55
+    BGRA_5551_UNORM = 0x56
+    BGRA_8888_UNORM = 0x57
+    BGRX_8888_UNORM = 0x58
+    RGBA_1010102_XR_BIAS_UNORM = 0x59
+    BGRA_8888_TYPELESS = 0x5A
+    BGRA_8888_UNORM_SRGB = 0x5B
+    BGRX_8888_TYPELESS = 0x5C
+    BGRX_8888_UNORM_SRGB = 0x5D
+    # BC6 & BC7
+    BC6H_TYPELESS = 0x5E
+    BC6H_UF16 = 0x5F
+    BC6H_SF16 = 0x60
+    BC7_TYPELESS = 0x61
+    BC7_UNORM = 0x62
+    BC7_UNORM_SRGB = 0x63
+    ...
 
 
 class DDS(base.Texture):
@@ -106,6 +159,7 @@ class DDS(base.Texture):
         assert stream.read(44) == b"\0" * 44
         assert read_struct(stream, "2I") == (0x20, 0x04)  # don't know, don't care
         # DX10 extended header
+        # TODO: not always present
         assert stream.read(4) == b"DX10"
         assert stream.read(20) == b"\0" * 20
         assert read_struct(stream, "I") == 0x00401008  # idk, some flags?
