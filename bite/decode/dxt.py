@@ -17,3 +17,6 @@ def DXT1_to_RGB24(texture: Texture, mip_index: MipIndex = None) -> bytes:
     # -- decode.detwiddle would be handy for this actually
     # -- each tile is a Z, so 1 iteration would suffice
     raise NotImplementedError()
+
+
+# NOTE: DXT3 & DXT5 consist of Alpha blocks followed by DXT1 RGB blocks

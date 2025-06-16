@@ -57,14 +57,17 @@ bytes_per_pixel = {
     Format.BGR_888_BLUESCREEN: 24,
     Format.ARGB_8888: 32,
     Format.BGRA_8888: 32,
-    Format.DXT1: 0.5,  # 8 bytes, 4x4 pixels
-    Format.DXT3: ...,
-    Format.DXT5: ...,
+    # NOTE: DXT always encodes a 4x4 tile of texels
+    # -- also known as Block Compression (DXT1 <=> BC1 etc.)
+    Format.DXT1: 0.5,
+    Format.DXT3: 1,
+    Format.DXT5: 1,
     Format.BGRX_8888: 32,
     Format.BGR_565: 16,
     Format.BGRX_5551: 16,
     Format.BGRA_4444: 16,
-    Format.DXT1_ONE_BIT_ALPHA: ...,
+    Format.DXT1_ONE_BIT_ALPHA: 0.5,
+    # NOTE: same as DXT1, but transparent black appears in the palette
     Format.BGRA_5551: 16,
     Format.UV_88: 16,
     Format.UVWQ_8888: 32,
@@ -75,10 +78,10 @@ bytes_per_pixel = {
 
 
 min_block_size = {
-    Format.DXT1: 8,  # 4 byte palette + 4 byte indices
-    Format.DXT3: ...,
-    Format.DXT5: ...,
-    Format.DXT1_ONE_BIT_ALPHA: ...,
+    Format.DXT1: 8,
+    Format.DXT3: 16,
+    Format.DXT5: 16,
+    Format.DXT1_ONE_BIT_ALPHA: 8,
     Format.BC6H_UF16: 16}
 
 
