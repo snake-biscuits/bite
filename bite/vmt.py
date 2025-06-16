@@ -5,11 +5,29 @@ from typing import Dict, List
 from . import base
 
 
-keyvalue_patterns = [
-    re.compile(f"{a}(.+){a}\\s+{b}(.+){b}")
-    for a in ("'", '"', "")
-    for b in ("'", '"', "")]
-# NOTE: unquoted last since we might accidental match it otherwise
+# NOTE: incomplete, based on VDC
+# -- they don't have a simple category for texture parameters
+# -- also don't have documentation for all possible parameters
+# -- https://developer.valvesoftware.com/wiki/Category_talk:Shader_parameters
+texture_parameters = {
+    "$basetexture": "colour",
+    "$basetexture2": "colour2",
+    "$blendmodulatetexture": "blend_modulate",
+    "$bumpmap": "normal",
+    "$bumpmap2": "normal2",
+    # NOTE: if `$ssbump` is true, bumpmap is a self-shadowing bumpmap
+    "$envmap": "cubemap",
+    # NOTE: not always a texture, can be "env_cubemap"
+    # -- this gets "patched" by the map compiler
+    "$envmapmask": "specular",  # Source
+    "$detail": "detail",
+    "$lightmap": "lightmap",
+    "$lightwarptexture": "light_warp",
+    "$phongexponenttexture": "phong_exponent",
+    "$specmap_texture": "specular_pbr",  # Black Mesa
+    "$texture2": "multiply",
+    # NOTE: texture2 is multiplied with basetexture in UnlitTwoTexture
+    "%tooltexture": "editor"}
 
 
 name_patterns = [
@@ -17,18 +35,25 @@ name_patterns = [
     for a in ("'", '"', "")]
 
 
-def keyvalue_of(line: str) -> (str, str):
-    for pattern in keyvalue_patterns:
-        match = pattern.match(line)
-        if match is not None:
-            return match.groups()
-
-
 def name_of(line: str) -> str:
     for pattern in name_patterns:
         match = pattern.match(line)
         if match is not None:
             return match.groups()[0]
+
+
+parameter_patterns = [
+    re.compile(f"{a}(.+){a}\\s+{b}(.+){b}")
+    for a in ("'", '"', "")
+    for b in ("'", '"', "")]
+# NOTE: unquoted last since we might accidental match it otherwise
+
+
+def parameter_of(line: str) -> (str, str):
+    for pattern in parameter_patterns:
+        match = pattern.match(line)
+        if match is not None:
+            return match.groups()
 
 
 def escape(word: str) -> str:
@@ -43,30 +68,30 @@ def escape(word: str) -> str:
 
 class Node:
     name: str
-    keyvalues: Dict[str, str]
+    parameters: Dict[str, str]
     children: List[Node]
     _line_length: int  # for skipping child node lines
 
     def __init__(self):
         self.name = None
-        self.keyvalues = dict()
+        self.parameters = dict()
         self.children = list()
         self._line_length = 0
 
     def __repr__(self) -> str:
         descriptor = " ".join([
             f"{self.name!r}" if self.name is not None else "None",
-            f"{len(self.keyvalues)} keyvalues",
+            f"{len(self.parameters)} parameters",
             f"{len(self.children)} children"])
         return f"<{self.__class__.__name__} {descriptor} @ 0x{id(self):016X}>"
 
     def __str__(self) -> str:
         indent = "  "
         lines = [escape(self.name), "{"]
-        keyvalues = [
+        parameters = [
             f"{escape(key)} {escape(value)}"
-            for key, value in self.keyvalues.items()]
-        lines.extend(f"{indent}{line}" for line in keyvalues)
+            for key, value in self.parameters.items()]
+        lines.extend(f"{indent}{line}" for line in parameters)
         for child in self.children:
             lines.extend(
                 f"{indent}{line}"
@@ -96,12 +121,12 @@ class Node:
                 out._line_length = i
                 return out  # node has been closed
             else:
-                keyvalue = keyvalue_of(line)
+                parameter = parameter_of(line)
                 name = name_of(line)
-                # NOTE: check for keyvalues first, names can match keyvalues
-                if keyvalue is not None:
-                    key, value = keyvalue
-                    out.keyvalues[key] = value
+                # NOTE: check for parameters first, names can match parameters
+                if parameter is not None:
+                    key, value = parameter
+                    out.parameters[key] = value
                 elif name is not None:
                     prev_line = name
                 else:
@@ -127,9 +152,14 @@ class VMT(base.Material):
         out = cls()
         out._raw = Node.from_lines(lines)
         out.shader = out._raw.name
-        # TODO: use a lookup dict to get textures from keyvalues
-        # out.textures["base"] = out._raw.keyvalues["$basetexture"]
-        # out.textures["secondary"] = out._raw.keyvalues["$texture2"]
-        # TODO: set flags from keyvalues
-        # out.is_transparent = bool(out._raw.keyvalues.get("$transparent", 0))
+        # parameters -> textures
+        for parameter, role in texture_parameters.items():
+            if parameter in out._raw.parameters:
+                texture_path = out._raw.parameters[parameter]
+                texture_path = texture_path.lower().replace("\\", "/")
+                out.textures[role] = texture_path
+        # set flags from parameters
+        translucent = out._raw.parameters.get("$translucent", 0)
+        alphatest = out._raw.parameters.get("$alphatest", 0)
+        out.is_transparent == 1 in (translucent, alphatest)
         return out
