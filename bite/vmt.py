@@ -158,8 +158,8 @@ class VMT(base.Material):
                 texture_path = out._raw.parameters[parameter]
                 texture_path = texture_path.lower().replace("\\", "/")
                 out.textures[role] = texture_path
-        # set flags from parameters
-        translucent = out._raw.parameters.get("$translucent", 0)
-        alphatest = out._raw.parameters.get("$alphatest", 0)
-        out.is_transparent == 1 in (translucent, alphatest)
+        # parameters -> flags
+        translucent = out._raw.parameters.get("$translucent", "0")
+        alphatest = out._raw.parameters.get("$alphatest", "0")
+        out.is_transparent == "1" in (translucent, alphatest)
         return out
