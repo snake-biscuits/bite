@@ -1,4 +1,6 @@
+# https://learn.microsoft.com/en-us/windows/win32/api/dxgiformat/ne-dxgiformat-dxgi_format
 # https://learn.microsoft.com/en-us/windows/win32/direct3ddds/dds-file-layout-for-cubic-environment-maps
+# https://learn.microsoft.com/en-us/windows/win32/direct3ddds/dds-header
 from __future__ import annotations
 import enum
 import io
@@ -9,6 +11,195 @@ from . import base
 from .utils import read_struct, write_struct
 
 
+class DDS(base.Texture):
+    extension: str = "dds"
+    folder: str
+    filename: str
+    # header
+    flags: int  # TODO: enum.IntFlag
+    size: base.Size
+    num_mipmaps: int
+    # DX10 extended header
+    format: DXGI
+    dimension: int
+    misc_flag: MiscFlag
+    alpha_flag: AlphaFlag
+    array_size: int
+    # pixel data
+    mipmaps: Dict[base.MipIndex, bytes]
+    # ^ {MipIndex(mip, frame, face): raw_mipmap_data}
+    raw_data: Union[bytes, None]  # if mipmaps cannot be split
+    # properties
+    is_cubemap: bool
+    num_frames: int
+
+    def __init__(self):
+        # defaults
+        self.alpha_flag = AlphaFlag.STRAIGHT
+        self.array_size = 1
+        self.dimension = Dimension.TEXTURE_2D
+        self.flags = Flags(0x000A1007)
+        self.format = DXGI.RGBA_8888_UNORM
+        self.misc_flag = MiscFlag(0)
+        self.num_mipmaps = 0
+        # NOTE: misc_flag must be set before num_frames
+        super().__init__()
+
+    def __repr__(self) -> str:
+        width, height = self.size
+        size = f"{width}x{height}"
+        return f"<DDS '{self.filename}' {size} {self.format.name}>"
+
+    def split(self) -> List[DDS]:
+        """separate a cubemap array into multiple files"""
+        # TODO: options for how to split
+        # TODO: make header copying universal
+        # -- then we could move this method to base.Texture
+        out = list()
+        base_filename = os.path.splitext(self.filename)[0]
+        is_cubemap = self.is_cubemap
+        for i in range(self.num_frames):
+            child = DDS()
+            child.alpha_flag = self.alpha_flag
+            child.array_size = 6 if is_cubemap else 1
+            child.dimension = self.dimension
+            child.filename = f"{base_filename}.{i}.dds"
+            child.flags = self.flags
+            child.format = self.format
+            child.misc_flag = self.misc_flag
+            child.num_mipmaps = self.num_mipmaps
+            child.size = self.size
+            if is_cubemap:
+                indices = {
+                    (mip, face): base.MipIndex(mip, i, base.Face(face))
+                    for mip in range(self.num_mipmaps)
+                    for face in range(6)}
+            else:
+                indices = {
+                    (mip, None): base.MipIndex(mip, i, None)
+                    for mip in range(self.num_mipmaps)}
+            child.mipmaps = {
+                base.MipIndex(mip, 0, face): self.mipmaps[index]
+                for (mip, face), index in indices.items()}
+            out.append(child)
+        return out
+
+    @property
+    def is_cubemap(self) -> bool:
+        return bool(self.misc_flag & MiscFlag.CUBEMAP)
+
+    @property
+    def num_frames(self) -> int:
+        if self.is_cubemap:
+            return self.array_size // 6
+        else:
+            return self.array_size
+
+    @num_frames.setter
+    def num_frames(self, value: int):
+        if self.is_cubemap:
+            self.array_size = value * 6
+        else:
+            self.array_size = value
+
+    @classmethod
+    def from_stream(cls, stream: io.BytesIO) -> DDS:
+        out = cls()
+        # header
+        assert stream.read(4) == b"DDS "
+        assert read_struct(stream, "I") == 0x7C  # header size
+        out.flags = Flags(read_struct(stream, "I"))
+        out.size = read_struct(stream, "2I")
+        # pitch / linsize & depth
+        assert read_struct(stream, "2I") == (0x00010000, 0x01)  # pitch / linsize?
+        out.num_mipmaps = read_struct(stream, "I")
+        assert stream.read(44) == b"\0" * 44  # reserved
+        assert read_struct(stream, "2I") == (0x20, 0x04)  # pixelformat
+        magic = stream.read(4)
+        if magic == b"DX10":  # DX10 extended header
+            assert stream.read(20) == b"\0" * 20
+            assert read_struct(stream, "I") == 0x00401008  # idk, some flags?
+            assert stream.read(16) == b"\0" * 16
+            out.format = DXGI(read_struct(stream, "I"))
+            out.dimension = Dimension(read_struct(stream, "I"))
+            out.misc_flag = MiscFlag(read_struct(stream, "I"))
+            out.array_size = read_struct(stream, "I")
+            out.alpha_flag = AlphaFlag(read_struct(stream, "I"))
+        else:
+            # TODO: magic -> format
+            # -- b"BC4U" -> DXGI.BC4_UNORM
+            # TODO: dimension, misc_flag & array_size
+            raise NotImplementedError("")
+        # pixel data
+        # TODO:
+        # bpp = bytes_per_pixel[out.format]
+        # mbs = min_block_size.get(out.format, 0)
+        # mip_sizes = [
+        #     max(int((out.width >> i) * (out.height >> i) * bpp), mbs)
+        #     for i in range(out.num_mipmaps)]
+        if out.format == DXGI.BC6H_UF16:
+            mip_sizes = [
+                max(1 << i, 4) ** 2
+                for i in reversed(range(out.num_mipmaps))]
+            if out.is_cubemap:
+                assert out.array_size % 6 == 0
+                out.mipmaps = {
+                    base.MipIndex(mip, frame, face): stream.read(mip_size)
+                    for frame in range(out.num_frames)
+                    for face in base.Face
+                    for mip, mip_size in enumerate(mip_sizes)}
+            else:
+                out.mipmaps = {
+                    base.MipIndex(mip, frame, None): stream.read(mip_size)
+                    for frame in out.array_size
+                    for mip, mip_size in enumerate(mip_sizes)}
+        else:
+            # TODO: UserWarning("unknown pixel format, could not parse mips")
+            out.raw_data = stream.read()
+        return out
+
+    def as_bytes(self) -> bytes:
+        stream = io.BytesIO()
+        # header
+        write_struct(stream, "4s", b"DDS ")
+        write_struct(stream, "I", 0x7C)
+        write_struct(stream, "I", self.flags.value)
+        write_struct(stream, "2I", *self.size)
+        write_struct(stream, "2I", 0x00010000, 0x01)  # pitch / linsize?
+        write_struct(stream, "I", self.num_mipmaps)
+        write_struct(stream, "44s", b"\0" * 44)
+        write_struct(stream, "2I", 0x20, 0x04)  # don't know, don't care
+        # DX10 extended header
+        write_struct(stream, "4s", b"DX10")
+        write_struct(stream, "20s", b"\0" * 20)
+        write_struct(stream, "I", 0x00401008)  # idk, some flags?
+        write_struct(stream, "16s", b"\0" * 16)
+        write_struct(stream, "I", self.format.value)
+        write_struct(stream, "I", self.dimension.value)
+        write_struct(stream, "I", self.misc_flag.value)
+        write_struct(stream, "I", self.array_size)
+        write_struct(stream, "I", self.alpha_flag.value)
+        # mip data
+        if isinstance(self.raw_data, bytes):
+            stream.write(self.raw_data)
+        else:
+            if self.is_cubemap:
+                stream.write(b"".join([
+                    self.mipmaps[base.MipIndex(mip, frame, face)]
+                    for frame in range(self.num_frames)
+                    for face in base.Face
+                    for mip in reversed(range(self.num_mipmaps))]))
+            else:
+                stream.write(b"".join([
+                    self.mipmaps[base.MipIndex(mip, frame)]
+                    for frame in range(self.num_frames)
+                    for mip in reversed(range(self.num_mipmaps))]))
+        # stream -> bytes
+        stream.seek(0)
+        return stream.read()
+
+
+# formats
 class DXGI(enum.Enum):
     UNKNOWN = 0x00
     RGBA_32323232_TYPELESS = 0x01
@@ -29,7 +220,57 @@ class DXGI(enum.Enum):
     RG_3232_FLOAT = 0x10
     RG_3232_UINT = 0x11
     RG_3232_SINT = 0x12
-    ...
+    RGX_32824_TYPELESS = 0x13
+    DSX_32824_FLOAT_UINT = 0x14
+    RXX_32824_FLOAT_TYPELESS = 0x15
+    XGX_32824_TYPELESS_UINT = 0x16
+    RGBA_1010102_TYPELESS = 0x17
+    RGBA_1010102_UNORM = 0x18
+    RGBA_1010102_UINT = 0x19
+    RGB_111110_FLOAT = 0x1A
+    RGBA_8888_TYPELESS = 0x1B
+    RGBA_8888_UNORM = 0x1C
+    RGBA_8888_UNORM_SRGB = 0x1D
+    RGBA_8888_UINT = 0x1E
+    RGBA_8888_SNORM = 0x1F
+    RGBA_8888_SINT = 0x20
+    RG_1616_TYPELESS = 0x21
+    RG_1616_FLOAT = 0x22
+    RG_1616_UNORM = 0x23
+    RG_1616_UINT = 0x24
+    RG_1616_SNORM = 0x25
+    RG_1616_SINT = 0x26
+    R_32_TYPELESS = 0x27
+    D_32_FLOAT = 0x28
+    R_32_FLOAT = 0x29
+    R_32_UINT = 0x2A
+    R_32_SINT = 0x2B
+    RG_248_TYPELESS = 0x2C
+    DS_248_UNORM_UINT = 0x2D
+    RX_248_UNORM_TYPLESS = 0x2E
+    XG_248_TYPLESS_UINT = 0x2F
+    RG_88_TYPELESS = 0x30
+    RG_88_UNORM = 0x31
+    RG_88_UINT = 0x32
+    RG_88_SNORM = 0x33
+    RG_88_SINT = 0x34
+    R_16_TYPELESS = 0x35
+    R_16_FLOAT = 0x36
+    D_16_UNORM = 0x37
+    R_16_UNORM = 0x38
+    R_16_UINT = 0x39
+    R_16_SNORM = 0x3A
+    R_16_SINT = 0x3B
+    R_8_TYPELESS = 0x3C
+    R_8_UNORM = 0x3D
+    R_8_UINT = 0x3E
+    R_8_SNORM = 0x3F
+    R_8_SINT = 0x40
+    A_8_UNORM = 0x41
+    R_1_UNORM = 0x42
+    RGBE_9995_SHARED_EXP = 0x43
+    RGBG_8888_UNORM = 0x44
+    GRGB_8888_UNORM = 0x45
     # S3TC / DXTn / BCn
     BC1_TYPELESS = 0x46
     BC1_UNORM = 0x47
@@ -63,169 +304,61 @@ class DXGI(enum.Enum):
     BC7_TYPELESS = 0x61
     BC7_UNORM = 0x62
     BC7_UNORM_SRGB = 0x63
-    ...
+    # ancient formats
+    AYUV = 0x64
+    Y410 = 0x65
+    Y416 = 0x66
+    NV12 = 0x67
+    P010 = 0x68
+    P016 = 0x69
+    OPAQUE_420 = 0x6A
+    YUY2 = 0x6B
+    Y210 = 0x6C
+    Y216 = 0x6D
+    NV11 = 0x6E
+    AI44 = 0x6F
+    IA44 = 0x70
+    P_8 = 0x71
+    AP_88 = 0x72
+    BGRA_4444_UNORM = 0x73
+    # NOTE: big gap of unofficial formats here
+    P208 = 0x82
+    V208 = 0x83
+    V408 = 0x84
+    # special
+    SAMPLER_FEEDBACK_MIN_MIP_OPAQUE = 0xBD
+    SAMPLER_FEEDBACK_MIP_REGION_USED_OPAQUE = 0xBE
+    FORCE_UINT = 0xFFFFFFFF
+
+# TODO: format sizes
+# TODO: format min block sizes
 
 
-class DDS(base.Texture):
-    extension: str = "dds"
-    folder: str
-    filename: str
-    # header
-    size: base.Size
-    num_mipmaps: int
-    # DX10 extended header
-    format: DXGI
-    resource_dimension: int  # always 3?
-    misc_flag: int  # TODO: enum
-    array_size: int
-    # pixel data
-    mipmaps: Dict[base.MipIndex, bytes]
-    # ^ {MipIndex(mip, frame, face): raw_mipmap_data}
-    raw_data: Union[bytes, None]  # if mipmaps cannot be split
-    # properties
-    is_cubemap: bool
-    num_frames: int
+# flag enums
+class AlphaFlag(enum.IntFlag):
+    UNKNOWN = 0x00
+    STRAIGHT = 0x01
+    PREMULTIPLIED = 0x02
+    OPAQUE = 0x03
+    CUSTOM = 0x04  # not used for transparency
 
-    def __init__(self):
-        super().__init__()
-        # defaults
-        self.array_size = 1
-        self.format = DXGI.BC6H_UF16
-        self.misc_flag = 0
-        self.num_mipmaps = 0
-        self.resource_dimension = 3
 
-    def __repr__(self) -> str:
-        width, height = self.size
-        size = f"{width}x{height}"
-        return f"<DDS '{self.filename}' {size} {self.format.name}>"
+class Dimension(enum.Enum):
+    TEXTURE_1D = 0x02  # width
+    TEXTURE_2D = 0x03  # width x height
+    TEXTURE_3D = 0x04  # width x height x depth
 
-    def split(self) -> List[DDS]:
-        """separate a cubemap array into multiple files"""
-        # TODO: options for how to split
-        # TODO: make header copying universal
-        # -- then we could move this method to base.Texture
-        out = list()
-        base_filename = os.path.splitext(self.filename)[0]
-        is_cubemap = self.is_cubemap
-        for i in range(self.num_frames):
-            child = DDS()
-            child.array_size = 6 if is_cubemap else 1
-            child.filename = f"{base_filename}.{i}.dds"
-            child.format = self.format
-            child.misc_flag = self.misc_flag
-            child.num_mipmaps = self.num_mipmaps
-            child.resource_dimension = self.resource_dimension
-            child.size = self.size
-            if is_cubemap:
-                indices = {
-                    (mip, face): base.MipIndex(mip, i, base.Face(face))
-                    for mip in range(self.num_mipmaps)
-                    for face in range(6)}
-            else:
-                indices = {
-                    (mip, None): base.MipIndex(mip, i, None)
-                    for mip in range(self.num_mipmaps)}
-            child.mipmaps = {
-                base.MipIndex(mip, 0, face): self.mipmaps[index]
-                for (mip, face), index in indices.items()}
-            out.append(child)
-        return out
 
-    @property
-    def is_cubemap(self) -> bool:
-        return self.resource_dimension == 3
+class Flags(enum.IntFlag):
+    CAPS = 0x00000001
+    HEIGHT = 0x00000002
+    WIDTH = 0x00000004
+    PITCH = 0x00000008
+    PIXEL_FORMAT = 0x00001000
+    MIPMAPS = 0x00020000
+    LINEAR_SIZE = 0x00080000
+    DEPTH = 0x00800000
 
-    @property
-    def num_frames(self) -> int:
-        if self.is_cubemap:
-            return self.array_size // 6
-        else:
-            return self.array_size
 
-    @num_frames.setter
-    def num_frames(self, value: int):
-        pass
-
-    @classmethod
-    def from_stream(cls, stream: io.BytesIO) -> DDS:
-        out = cls()
-        # header
-        assert stream.read(4) == b"DDS "
-        assert read_struct(stream, "2I") == (0x7C, 0x000A1007)  # version?
-        out.size = read_struct(stream, "2I")
-        assert read_struct(stream, "2I") == (0x00010000, 0x01)  # pitch / linsize?
-        out.num_mipmaps = read_struct(stream, "I")
-        assert stream.read(44) == b"\0" * 44
-        assert read_struct(stream, "2I") == (0x20, 0x04)  # don't know, don't care
-        # DX10 extended header
-        # TODO: not always present
-        assert stream.read(4) == b"DX10"
-        assert stream.read(20) == b"\0" * 20
-        assert read_struct(stream, "I") == 0x00401008  # idk, some flags?
-        assert stream.read(16) == b"\0" * 16
-        out.format = DXGI(read_struct(stream, "I"))
-        out.resource_dimension = read_struct(stream, "I")
-        out.misc_flag = read_struct(stream, "I")
-        out.array_size = read_struct(stream, "I")
-        assert stream.read(4) == b"\0" * 4  # reserved
-        # pixel data
-        if out.format == DXGI.BC6H_UF16:
-            mip_sizes = [
-                max(1 << i, 4) ** 2
-                for i in reversed(range(out.num_mipmaps))]
-            if out.is_cubemap:
-                assert out.array_size % 6 == 0
-                out.mipmaps = {
-                    base.MipIndex(mip, frame, face): stream.read(mip_size)
-                    for frame in range(out.num_frames)
-                    for face in base.Face
-                    for mip, mip_size in enumerate(mip_sizes)}
-            else:
-                out.mipmaps = {
-                    base.MipIndex(mip, frame, None): stream.read(mip_size)
-                    for frame in out.array_size
-                    for mip, mip_size in enumerate(mip_sizes)}
-        else:
-            # TODO: UserWarning("unknown pixel format, could not parse mips")
-            out.raw_data = stream.read()
-        return out
-
-    def as_bytes(self) -> bytes:
-        stream = io.BytesIO()
-        # header
-        write_struct(stream, "4s", b"DDS ")
-        write_struct(stream, "2I", 0x7C, 0x000A1007)  # version?
-        write_struct(stream, "2I", *self.size)
-        write_struct(stream, "2I", 0x00010000, 0x01)  # pitch / linsize?
-        write_struct(stream, "I", self.num_mipmaps)
-        write_struct(stream, "44s", b"\0" * 44)
-        write_struct(stream, "2I", 0x20, 0x04)  # don't know, don't care
-        # DX10 extended header
-        write_struct(stream, "4s", b"DX10")
-        write_struct(stream, "20s", b"\0" * 20)
-        write_struct(stream, "I", 0x00401008)  # idk, some flags?
-        write_struct(stream, "16s", b"\0" * 16)
-        write_struct(stream, "I", self.format.value)
-        write_struct(stream, "I", self.resource_dimension)
-        write_struct(stream, "I", self.misc_flag)
-        write_struct(stream, "I", self.array_size)
-        write_struct(stream, "4s", b"\0" * 4)  # reserved
-        # mip data
-        if isinstance(self.raw_data, bytes):
-            stream.write(self.raw_data)
-        else:
-            if self.resource_dimension == 3:  # cubemap
-                stream.write(b"".join([
-                    self.mipmaps[base.MipIndex(mip, frame, face)]
-                    for frame in range(self.array_size)
-                    for face in base.Face
-                    for mip in reversed(range(self.num_mipmaps))]))
-            else:
-                stream.write(b"".join([
-                    self.mipmaps[base.MipIndex(mip, frame)]
-                    for frame in range(self.array_size)
-                    for mip in reversed(range(self.num_mipmaps))]))
-        # stream -> bytes
-        stream.seek(0)
-        return stream.read()
+class MiscFlag(enum.IntFlag):
+    CUBEMAP = 0x04
