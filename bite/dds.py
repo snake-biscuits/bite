@@ -86,7 +86,8 @@ class DDS(base.Texture):
 
     @property
     def is_cubemap(self) -> bool:
-        return bool(self.misc_flag & MiscFlag.CUBEMAP)
+        # return bool(self.misc_flag & MiscFlag.CUBEMAP)
+        return self.dimension == Dimension.TEXTURE_2D
 
     @property
     def num_frames(self) -> int:
@@ -151,7 +152,7 @@ class DDS(base.Texture):
             else:
                 out.mipmaps = {
                     base.MipIndex(mip, frame, None): stream.read(mip_size)
-                    for frame in out.array_size
+                    for frame in range(out.num_faces)
                     for mip, mip_size in enumerate(mip_sizes)}
         else:
             # TODO: UserWarning("unknown pixel format, could not parse mips")
