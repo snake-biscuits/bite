@@ -4,6 +4,7 @@
 from __future__ import annotations
 import enum
 import io
+import math
 from typing import Dict, Union
 
 from . import base
@@ -16,9 +17,20 @@ class PixelMode(enum.Enum):
     ARGB_4444 = 0x02
     YUV_422 = 0x03
     BUMP_MAP = 0x04
-    PAL_4 = 0x05
-    PAL_8 = 0x06
+    PALETTE_4 = 0x05
+    PALETTE_8 = 0x06
     RESERVED = 0x07
+
+
+bytes_per_pixel = {
+    PixelMode.ARGB_1555: 2,
+    PixelMode.RGB_565: 2,
+    PixelMode.ARGB_4444: 2,
+    PixelMode.YUV_422: 2,
+    PixelMode.BUMP_MAP: 2,
+    PixelMode.PALETTE_4: 0.5,
+    PixelMode.PALETTE_8: 1}
+# NOTE: no compressed PixelMode, no min_block_size
 
 
 class TextureMode(enum.Enum):
@@ -108,19 +120,28 @@ class PVR(base.Texture):
         out.format = Format(PixelMode(pixel_mode), TextureMode(texture_mode))
         assert read_struct(stream, "H") == 0  # padding
         out.size = read_struct(stream, "2H")
-        # pixel data
+        # mipmap indexing
         out.num_frames = 1
         if out.format.texture.name.endswith("_MIPS"):
-            # TODO: mip_sizes tables by pixel format
+            raise NotImplementedError("PVR w/ mipmaps")
             out.num_mipmaps = ...
-            mip_sizes = list()
-            out.mipmaps = {
-                base.MipIndex(mip, frame, None): stream.read(mip_size)
-                for frame in out.array_size
-                for mip, mip_size in enumerate(mip_sizes)}
         else:
             out.num_mipmaps = 1
-            out.mipmaps[base.MipIndex(0, 0, None)] = stream.read()
+        # calculate mip_sizes
+        width, height = out.size
+        try:
+            bpp = bytes_per_pixel[out.format.pixel]
+        except KeyError:
+            # TODO: UserWarning(f"Unknown bpp for format: {out.format.name}")
+            out.raw_data = stream.read()
+            return out
+        mip_sizes = [
+            math.ceil((width >> i) * (height >> i) * bpp)
+            for i in range(out.num_mipmaps)]
+        # read mipmaps
+        out.mipmaps = {
+            base.MipIndex(mip, 0, None): stream.read(mip_size)
+            for mip, mip_size in enumerate(mip_sizes)}
         return out
 
     def as_bytes(self) -> bytes:
