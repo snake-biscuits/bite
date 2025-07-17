@@ -4,6 +4,7 @@
 from __future__ import annotations
 import enum
 import io
+import math
 import os
 from typing import Dict, List, Union
 
@@ -131,32 +132,31 @@ class DDS(base.Texture):
             # -- b"BC4U" -> DXGI.BC4_UNORM
             # TODO: dimension, misc_flag & array_size
             raise NotImplementedError("")
-        # pixel data
-        # TODO:
-        # bpp = bytes_per_pixel[out.format]
-        # mbs = min_block_size.get(out.format, 0)
-        # mip_sizes = [
-        #     max(int((out.width >> i) * (out.height >> i) * bpp), mbs)
-        #     for i in range(out.num_mipmaps)]
-        if out.format == DXGI.BC6H_UF16:
-            mip_sizes = [
-                max(1 << i, 4) ** 2
-                for i in reversed(range(out.num_mipmaps))]
-            if out.is_cubemap:
-                assert out.array_size % 6 == 0
-                out.mipmaps = {
-                    base.MipIndex(mip, frame, face): stream.read(mip_size)
-                    for frame in range(out.num_frames)
-                    for face in base.Face
-                    for mip, mip_size in enumerate(mip_sizes)}
-            else:
-                out.mipmaps = {
-                    base.MipIndex(mip, frame, None): stream.read(mip_size)
-                    for frame in range(out.num_faces)
-                    for mip, mip_size in enumerate(mip_sizes)}
-        else:
-            # TODO: UserWarning("unknown pixel format, could not parse mips")
+        # calculate mip_sizes
+        width, height = out.size
+        try:
+            bpp = bytes_per_pixel[out.format]
+        except KeyError:
+            # TODO: UserWarning(f"Unknown bpp for format: {out.format.name}")
             out.raw_data = stream.read()
+            return out
+        mbs = min_block_size.get(out.format, 0)
+        mip_sizes = [
+            max(math.ceil((width >> i) * (height >> i) * bpp), mbs)
+            for i in range(out.num_mipmaps)]
+        # read mipmaps
+        if out.is_cubemap:
+            assert out.array_size % 6 == 0
+            out.mipmaps = {
+                base.MipIndex(mip, frame, face): stream.read(mip_size)
+                for frame in range(out.num_frames)
+                for face in base.Face
+                for mip, mip_size in enumerate(mip_sizes)}
+        else:
+            out.mipmaps = {
+                base.MipIndex(mip, frame, None): stream.read(mip_size)
+                for frame in range(out.num_faces)
+                for mip, mip_size in enumerate(mip_sizes)}
         return out
 
     def as_bytes(self) -> bytes:
@@ -331,8 +331,69 @@ class DXGI(enum.Enum):
     SAMPLER_FEEDBACK_MIP_REGION_USED_OPAQUE = 0xBE
     FORCE_UINT = 0xFFFFFFFF
 
-# TODO: format sizes
-# TODO: format min block sizes
+
+bytes_per_pixel = {
+    **{F: 4 for F in (
+        DXGI.R_32_TYPELESS, DXGI.D_32_FLOAT, DXGI.R_32_FLOAT,
+        DXGI.R_32_UINT, DXGI.R_32_SINT)},
+    **{FF: 4 for FF in (
+        DXGI.RG_248_TYPELESS, DXGI.DS_248_UNORM_UINT,
+        DXGI.RX_248_UNORM_TYPLESS, DXGI.XG_248_TYPLESS_UINT)},
+    **{RG: 2 for RG in (
+        DXGI.RG_88_TYPELESS, DXGI.RG_88_UNORM, DXGI.RG_88_UINT,
+        DXGI.RG_88_SNORM, DXGI.RG_88_SINT)},
+    **{F: 2 for F in (
+        DXGI.R_16_TYPELESS, DXGI.R_16_FLOAT, DXGI.D_16_UNORM,
+        DXGI.R_16_UNORM, DXGI.R_16_UINT, DXGI.R_16_SNORM, DXGI.R_16_SINT)},
+    **{F: 1 for F in (
+        DXGI.R_8_TYPELESS, DXGI.R_8_UNORM, DXGI.R_8_UINT,
+        DXGI.R_8_SNORM, DXGI.R_8_SINT, DXGI.A_8_UNORM)},
+    DXGI.R_1_UNORM: 1/8,
+    DXGI.RGBE_9995_SHARED_EXP: 4,
+    DXGI.RGBG_8888_UNORM: 4,
+    DXGI.GRGB_8888_UNORM: 4,
+    **{RGBA: 16 for RGBA in (
+        DXGI.RGBA_32323232_TYPELESS, DXGI.RGBA_32323232_FLOAT,
+        DXGI.RGBA_32323232_UINT, DXGI.RGBA_32323232_SINT)},
+    **{RGB: 12 for RGB in (
+        DXGI.RGB_323232_TYPELESS, DXGI.RGB_323232_FLOAT,
+        DXGI.RGB_323232_UINT, DXGI.RGB_323232_SINT)},
+    **{RGBA: 8 for RGBA in (
+        DXGI.RGBA_16161616_TYPELESS, DXGI.RGBA_16161616_FLOAT,
+        DXGI.RGBA_16161616_UNORM, DXGI.RGBA_16161616_UINT,
+        DXGI.RGBA_16161616_SNORM, DXGI.RGBA_16161616_SINT)},
+    **{RG: 8 for RG in (
+        DXGI.RG_3232_TYPELESS, DXGI.RG_3232_FLOAT,
+        DXGI.RG_3232_UINT, DXGI.RG_3232_SINT)},
+    **{BC1: 0.5 for BC1 in (
+        DXGI.BC1_TYPELESS, DXGI.BC1_UNORM, DXGI.BC1_UNORM_SRGB)},
+    # TODO: BC2
+    **{BC: 1 for BC in (
+        DXGI.BC3_TYPELESS, DXGI.BC3_UNORM, DXGI.BC3_UNORM_SRGB,
+        DXGI.BC5_TYPELESS, DXGI.BC5_UNORM, DXGI.BC5_SNORM,
+        DXGI.BC6H_TYPELESS, DXGI.BC6H_UF16, DXGI.BC6H_SF16)},
+    # TODO: BC4
+    # TODO: BC7
+    DXGI.BGR_565_UNORM: 2,
+    DXGI.BGRA_5551_UNORM: 2,
+    **{BGRX: 4 for BGRX in (
+        DXGI.BGRA_8888_UNORM, DXGI.BGRX_8888_UNORM,
+        DXGI.RGBA_1010102_XR_BIAS_UNORM,
+        DXGI.BGRA_8888_TYPELESS, DXGI.BGRA_8888_UNORM_SRGB,
+        DXGI.BGRX_8888_TYPELESS, DXGI.BGRX_8888_UNORM_SRGB)},
+    # TODO: ancient formats
+    }
+
+
+min_block_size = {
+    DXGI.R_1_UNORM: 1,
+    **{BC1: 8 for BC1 in (  # DXT1
+        DXGI.BC1_TYPELESS, DXGI.BC1_UNORM, DXGI.BC1_UNORM_SRGB)},
+    # TODO: BC2, 4 & 7
+    **{BC: 16 for BC in (
+        DXGI.BC3_TYPELESS, DXGI.BC3_UNORM, DXGI.BC3_UNORM_SRGB,
+        DXGI.BC5_TYPELESS, DXGI.BC5_UNORM, DXGI.BC5_SNORM,
+        DXGI.BC6H_TYPELESS, DXGI.BC6H_UF16, DXGI.BC6H_SF16)}}
 
 
 # flag enums
