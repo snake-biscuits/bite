@@ -3,6 +3,7 @@
 from __future__ import annotations
 import enum
 import io
+import math
 import struct
 from typing import Any, Dict, List, Tuple, Union
 
@@ -235,23 +236,24 @@ class VTF(base.Texture):
         assert out.low_res_format == Format.NONE
         assert out.low_res_size == (0, 0)
         assert out.first_frame == 0
-        # calculate mip_sizes
-        width, height = out.size
-        try:
-            bpp = bytes_per_pixel[out.format]
-        except KeyError:
-            raise NotImplementedError(
-                f"Unknown bytes-per-pixel for format: {out.format.name}")
-        limit = min_block_size.get(out.format, 0)
-        mip_sizes = [
-            max(int((width >> i) * (height >> i) * bpp), limit)
-            for i in range(out.num_mipmaps)]
         # seek to start of mipmaps
         if "Image Data" in out.resources:
             stream.seek(out.resources["Image Data"].offset)
         else:
             raise RuntimeError(
                 "Can't locate mipmaps without 'Image Data' resource")
+        # calculate mip_sizes
+        width, height = out.size
+        try:
+            bpp = bytes_per_pixel[out.format]
+        except KeyError:
+            # TODO: UserWarning(f"Unknown bpp for format: {out.format.name}")
+            out.raw_data = stream.read()
+            return out
+        mbs = min_block_size.get(out.format, 0)
+        mip_sizes = [
+            max(math.ceil((width >> i) * (height >> i) * bpp), mbs)
+            for i in range(out.num_mipmaps)]
         # read mipmaps
         if out.is_cubemap:
             out.mipmaps = {
