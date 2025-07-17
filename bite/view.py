@@ -8,6 +8,7 @@ import numpy as np
 
 from .base import Face, MipIndex, Size, Texture
 from .dds import DDS
+from .pvr import PVR
 from .vtf import VTF
 
 
@@ -33,10 +34,12 @@ class Viewer:
         # load texture from file
         name, path = list(app_data["selections"].items())[0]
         base, ext = os.path.splitext(path.lower())
-        if ext == ".vtf":
-            self.texture = VTF.from_file(path)
-        elif ext == ".dds":
+        if ext == ".dds":
             self.texture = DDS.from_file(path)
+        elif ext == ".pvr":
+            self.texture = PVR.from_file(path)
+        elif ext == ".vtf":
+            self.texture = VTF.from_file(path)
         else:
             raise RuntimeError(f"Unknown Extension: {ext!r}")
         if self.texture.raw_data is not None:
@@ -96,6 +99,7 @@ class Viewer:
         texture_bytes = self.texture.mipmaps[self.index] * 4
         # NOTE: x4 for BC6 compression factor
         # TODO: use OpenGL framebuffer to convert texture on the GPU
+        # TODO: detwiddle PVR
         mip_float32 = (np.frombuffer(
             texture_bytes,
             dtype=np.uint8) / 255).astype(np.float32)
@@ -142,7 +146,9 @@ def main():
             callback=lambda s, a: Viewer(s, a, "main"),
             tag="file_browser",
             width=768, height=320):
+        # NOTE: case-sensitive, idk why
         imgui.add_file_extension("Direct Draw Surface (*.dds){.dds}")
+        imgui.add_file_extension("PowerVR Texture (*.pvr){.pvr,.PVR}")
         imgui.add_file_extension("Valve Texture Format (*.vtf){.vtf}")
 
     # NOTE: forcing 4k min size to ensure we fill the viewport
