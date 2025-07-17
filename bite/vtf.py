@@ -230,37 +230,40 @@ class VTF(base.Texture):
         if "Cubemap Multiply Ambient" in out.resources:
             out.cma = CMA.from_vtf_stream(out, stream)
             stream.seek(header_size)
-        # mipmaps
-        assert Flags.ENVMAP in out.flags
+        # check assumptions
+        # TODO: handle low res "thumbnail"
         assert out.low_res_format == Format.NONE
         assert out.low_res_size == (0, 0)
         assert out.first_frame == 0
-        assert "Image Data" in out.resources
-        stream.seek(out.resources["Image Data"].offset)
-        # TODO: r1o 32x32 Format.DXT5 "cubemapdefault.vtf" (LDR)
-        # TODO: r1o 32x32 Format.RGBA_16161616F "cubemapdefault.hdr.vtf" (HDR)
-        # -- mip bytes are all zero afaik
-        # Titanfall
-        if out.format == Format.RGBA_8888 and out.size == (64, 64):
-            mip_sizes = [
-                (1 << i) ** 2 * 4
-                for i in reversed(range(out.num_mipmaps))]
-        # Titanfall 2 / Apex Legends
-        elif out.format == Format.BC6H_UF16 and out.size == (256, 256):
-            mip_sizes = [
-                max(1 << i, 4) ** 2
-                for i in reversed(range(out.num_mipmaps))]
+        # calculate mip_sizes
+        width, height = out.size
+        try:
+            bpp = bytes_per_pixel[out.format]
+        except KeyError:
+            raise NotImplementedError(
+                f"Unknown bytes-per-pixel for format: {out.format.name}")
+        limit = min_block_size.get(out.format, 0)
+        mip_sizes = [
+            max(int((width >> i) * (height >> i) * bpp), limit)
+            for i in range(out.num_mipmaps)]
+        # seek to start of mipmaps
+        if "Image Data" in out.resources:
+            stream.seek(out.resources["Image Data"].offset)
         else:
-            # TODO: UserWarning("unknown pixel format, could not parse mips")
-            out.raw_data = stream.read()
-            return out
-        # parse mipmaps
-        # mip.X-side.0-cubemap.0 ... mip.0-side.5-cubemap.X
-        out.mipmaps = {
-            base.MipIndex(mip, frame, face): stream.read(mip_size)
-            for mip, mip_size in reversed([*enumerate(mip_sizes)])
-            for frame in range(out.num_frames)
-            for face in base.Face}
+            raise RuntimeError(
+                "Can't locate mipmaps without 'Image Data' resource")
+        # read mipmaps
+        if out.is_cubemap:
+            out.mipmaps = {
+                base.MipIndex(mip, frame, face): stream.read(mip_size)
+                for mip, mip_size in reversed([*enumerate(mip_sizes)])
+                for frame in range(out.num_frames)
+                for face in base.Face}
+        else:
+            out.mipmaps = {
+                base.MipIndex(mip, frame, None): stream.read(mip_size)
+                for mip, mip_size in reversed([*enumerate(mip_sizes)])
+                for frame in range(out.num_frames)}
         return out
 
     @property
