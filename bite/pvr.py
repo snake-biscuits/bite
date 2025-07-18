@@ -142,19 +142,37 @@ class PVR(base.Texture):
         out.mipmaps = {
             base.MipIndex(mip, 0, None): stream.read(mip_size)
             for mip, mip_size in enumerate(mip_sizes)}
+        # TODO: assert data_size
         return out
 
     def as_bytes(self) -> bytes:
-        raise NotImplementedError()
         stream = io.BytesIO()
+        if isinstance(self.raw_data, bytes):
+            data_size = len(self.raw_data)
+        else:
+            data_size = sum(
+                len(mipmap)
+                for mipmap in self.mipmaps.values())
+        # gbix
+        if isinstance(self.gbix, bytes):
+            stream.write(b"GBIX")
+            write_struct(stream, "I", len(self.gbix))
+            stream.write(self.gbix)
+            data_size += len(self.gbix)  # guessing
         # header
-        write_struct(stream, "...", ...)
-        ...
+        stream.write(b"PVRT")
+        write_struct(stream, "I", data_size)
+        write_struct(stream, "B", self.format.pixel.value)
+        write_struct(stream, "B", self.format.texture.value)
+        write_struct(stream, "H", 0)  # padding
+        write_struct(stream, "2H", *self.size)
         # mip data
         if isinstance(self.raw_data, bytes):
             stream.write(self.raw_data)
         else:
-            ...
+            stream.write(b"".join([
+                self.mipmaps[base.MipIndex(mip, 0, None)]
+                for mip in range(self.num_mipmaps)]))
         # stream -> bytes
         stream.seek(0)
         return stream.read()
