@@ -96,8 +96,6 @@ class PVR(base.Texture):
         super().__init__()
         # defaults
         self.gbix = None
-        self.version = (0, 0)
-        self.data_size = 0
         self.format = Format(PixelMode(0), TextureMode(1))
 
     def __repr__(self) -> str:
@@ -115,7 +113,7 @@ class PVR(base.Texture):
             out.gbix = stream.read(length)  # 1 or 2 ints?
             magic = stream.read(4)
         assert magic == b"PVRT"
-        out.data_size = read_struct(stream, "I")
+        data_size = read_struct(stream, "I")
         pixel_mode, texture_mode = read_struct(stream, "2B")
         out.format = Format(PixelMode(pixel_mode), TextureMode(texture_mode))
         assert read_struct(stream, "H") == 0  # padding
@@ -142,7 +140,7 @@ class PVR(base.Texture):
         out.mipmaps = {
             base.MipIndex(mip, 0, None): stream.read(mip_size)
             for mip, mip_size in enumerate(mip_sizes)}
-        # TODO: assert data_size
+        assert data_size == sum(len(m) for m in out.mipmaps.values()) + 8
         return out
 
     def as_bytes(self) -> bytes:
@@ -153,12 +151,12 @@ class PVR(base.Texture):
             data_size = sum(
                 len(mipmap)
                 for mipmap in self.mipmaps.values())
+        data_size += 8
         # gbix
         if isinstance(self.gbix, bytes):
             stream.write(b"GBIX")
             write_struct(stream, "I", len(self.gbix))
             stream.write(self.gbix)
-            data_size += len(self.gbix)  # guessing
         # header
         stream.write(b"PVRT")
         write_struct(stream, "I", data_size)
