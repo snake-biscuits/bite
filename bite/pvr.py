@@ -98,6 +98,7 @@ class PVR(base.Texture):
         super().__init__()
         # defaults
         self.gbix = None
+        self.data_size = 8
         self.format = Format(PixelMode(0), TextureMode(1))
 
     def __repr__(self) -> str:
@@ -115,7 +116,7 @@ class PVR(base.Texture):
             out.gbix = stream.read(length)  # 1 or 2 ints?
             magic = stream.read(4)
         assert magic == b"PVRT"
-        data_size = read_struct(stream, "I")
+        out.data_size = read_struct(stream, "I")
         pixel_mode, texture_mode = read_struct(stream, "2B")
         out.format = Format(PixelMode(pixel_mode), TextureMode(texture_mode))
         assert read_struct(stream, "H") == 0  # padding
@@ -138,7 +139,7 @@ class PVR(base.Texture):
             math.ceil((width >> i) * (height >> i) * bpp)
             for i in range(out.num_mipmaps)]
         # NOTE: should catch VQ & _MIPS TextureModes
-        if sum(mip_sizes) + 8 != data_size:
+        if sum(mip_sizes) + 8 != out.data_size:
             # TODO: UserWarning(f"Incorrect bpp for format: {out.format.name}")
             out.raw_data = stream.read()
             return out
@@ -146,7 +147,6 @@ class PVR(base.Texture):
         out.mipmaps = {
             base.MipIndex(mip, 0, None): stream.read(mip_size)
             for mip, mip_size in enumerate(mip_sizes)}
-        assert data_size == sum(len(m) for m in out.mipmaps.values()) + 8
         return out
 
     def as_bytes(self) -> bytes:
@@ -154,6 +154,7 @@ class PVR(base.Texture):
         if isinstance(self.raw_data, bytes):
             data_size = len(self.raw_data)
         else:
+            # NOTE: will be incorrect for some TextureModes
             data_size = sum(
                 len(mipmap)
                 for mipmap in self.mipmaps.values())
