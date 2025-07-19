@@ -43,7 +43,9 @@ class TextureMode(enum.Enum):
     PAL_8 = 0x07
     PAL_8_MIPS = 0x08
     RECTANGLE = 0x09
+    RECTANGLE_MIPS = 0x0A
     STRIDE = 0x0B
+    STRIDE_MIPS = 0x0C
     TWIDDLED_RECTANGLE = 0x0D
     SMALL_VQ = 0x10
     SMALL_VQ_MIPS = 0x11
@@ -120,11 +122,10 @@ class PVR(base.Texture):
         out.size = read_struct(stream, "2H")
         # mipmap indexing
         out.num_frames = 1
-        if out.format.texture.name.endswith("_MIPS"):
-            raise NotImplementedError("PVR w/ mipmaps")
-            out.num_mipmaps = ...
-        else:
-            out.num_mipmaps = 1
+        out.num_mipmaps = 1
+        # if out.format.texture.name.endswith("_MIPS"):
+        #     raise NotImplementedError("PVR w/ mipmaps")
+        #     out.num_mipmaps = ...
         # calculate mip_sizes
         width, height = out.size
         try:
@@ -136,6 +137,11 @@ class PVR(base.Texture):
         mip_sizes = [
             math.ceil((width >> i) * (height >> i) * bpp)
             for i in range(out.num_mipmaps)]
+        # NOTE: should catch VQ & _MIPS TextureModes
+        if sum(mip_sizes) + 8 != data_size:
+            # TODO: UserWarning(f"Incorrect bpp for format: {out.format.name}")
+            out.raw_data = stream.read()
+            return out
         # read mipmaps
         out.mipmaps = {
             base.MipIndex(mip, 0, None): stream.read(mip_size)
