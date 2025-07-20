@@ -7,9 +7,13 @@ import dearpygui.dearpygui as imgui
 import numpy as np
 
 from .base import Face, MipIndex, Size, Texture
-from .dds import DDS
-from .pvr import PVR
-from .vtf import VTF
+# texture formats
+from . import dds
+from . import pvr
+from . import vtf
+# mipmap translation
+from . import decode
+from . import render
 
 
 def rgb_to_rgba(rgb: bytes) -> bytes:
@@ -35,11 +39,11 @@ class Viewer:
         name, path = list(app_data["selections"].items())[0]
         base, ext = os.path.splitext(path.lower())
         if ext == ".dds":
-            self.texture = DDS.from_file(path)
+            self.texture = dds.DDS.from_file(path)
         elif ext == ".pvr":
-            self.texture = PVR.from_file(path)
+            self.texture = pvr.PVR.from_file(path)
         elif ext == ".vtf":
-            self.texture = VTF.from_file(path)
+            self.texture = vtf.VTF.from_file(path)
         else:
             raise RuntimeError(f"Unknown Extension: {ext!r}")
         if self.texture.raw_data is not None:
@@ -94,20 +98,55 @@ class Viewer:
     def mip_size(self, mip: int) -> Size:
         return [axis // (1 << mip) for axis in self.texture.size]
 
-    def update(self):
-        mip = self.index.mip
-        texture_bytes = self.texture.mipmaps[self.index] * 4
-        # NOTE: x4 for BC6 compression factor
-        # TODO: use OpenGL framebuffer to convert texture on the GPU
-        # TODO: detwiddle PVR
-        mip_float32 = (np.frombuffer(
+    def pixels(self) -> np.array:  # 0..1 float32 RGBA
+        # TODO: use a render.FrameBuffer for all textures
+        # -- create at initialisation
+        if isinstance(self.texture, dds.DDS):
+            texture_bytes = self.pixels_dds()
+        elif isinstance(self.texture, pvr.PVR):
+            texture_bytes = self.pixels_pvr()
+        elif isinstance(self.texture, vtf.VTF):
+            texture_bytes = self.pixels_vtf()
+        else:
+            cls = self.texture.__class__.__name__
+            raise NotImplementedError(f"Cannot get pixels from '{cls}'")
+        return (np.frombuffer(
             texture_bytes,
             dtype=np.uint8) / 255).astype(np.float32)
-        # update raw texture of correct mip scale
-        imgui.set_value(self.texture_tags[mip], mip_float32)
-        imgui.configure_item(
-            self.preview_tag,
-            texture_tag=self.texture_tags[mip])
+
+    def pixels_dds(self) -> bytes:  # RGBA_8888
+        texture_bytes = self.texture.mipmaps[self.index]
+        # TODO: support more formats
+        if self.texture.format == dds.DXGI.RGBA_8888_UINT:
+            return texture_bytes
+        elif self.texture.format == dds.DXGI.BC6H_UF16:
+            # # duplicate uncompressed data to fill texture
+            # texture_bytes *= 4
+            frame_buffer = render.FrameBuffer2D.from_texture(self.texture)
+            # TODO: update frame_buffer MipIndex & viewport size
+            texture_bytes = rgb_to_rgba(frame_buffer.draw())
+        else:
+            fmt = self.texture.format.name
+            raise NotImplementedError(f"Cannot convert: '{fmt}'")
+        return texture_bytes
+
+    def pixels_pvr(self) -> bytes:  # RGBA_8888
+        # TODO: support more formats
+        assert self.texture.format.texture == pvr.TextureMode.TWIDDLED
+        return decode.twiddle.TWIDDLED_to_ORDERED(self.texture, self.index)
+        # NOTE: built for ABGR_4444_TWIDDLED
+        # -- need to refactor so pixel and texture translation are separated
+
+    def pixels_vtf(self) -> bytes:  # RGBA_8888
+        # TODO: support more formats
+        assert self.texture.format == vtf.Format.RGBA_8888
+        return self.texture.mipmaps[self.index]
+
+    def update(self):
+        """update texture to reflect current index"""
+        texture_tag = self.texture_tags[self.index.mip]
+        imgui.set_value(texture_tag, self.pixels())
+        imgui.configure_item(self.preview_tag, texture_tag=texture_tag)
 
     # callbacks
     def mip_callback(self):

@@ -7,7 +7,7 @@ import OpenGL.GL as gl
 from ..base import Face, MipIndex, Size, Texture
 from .. import dds
 from .. import vtf
-from .base import Renderer
+from . import base
 
 
 # NOTE: stored in OpenGL.GL.ARB.texture_compression_bptc
@@ -30,11 +30,12 @@ def internal_format(texture: Texture) -> (int, bool):
     return format_for[texture.extension][texture.format]
 
 
-class TextureRenderer(Renderer):
+class FrameBuffer2D(base.Renderer):
+    """render a single texture, filling the viewport"""
     texture0: int
 
-    # TODO: GL_TEXTURE_CUBE_MAP
-    # -- gl.GL_TEXTURE_CUBE_MAP_{POSI,NEGA}TIVE_{X,Y,Z}
+    # TODO: update texture mips
+
     def init_texture_2d(self, size: Size, fmt: int, is_compressed: bool, data: bytes):
         self.texture0 = gl.glGenTextures(1)
         gl.glBindTexture(gl.GL_TEXTURE_2D, self.texture0)
@@ -45,13 +46,15 @@ class TextureRenderer(Renderer):
         if is_compressed:
             gl.glCompressedTexImage2D(gl.GL_TEXTURE_2D, 0, fmt, *size, 0, data)
         else:
+            # NOTE: using GL_RGB because RGBA is hard
+            # -- difficult, but not impossible
             fmt2 = gl.GL_RGB
             type_ = gl.GL_UNSIGNED_BYTE
             gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, fmt, *size, 0, fmt2, type_, data)
         # NOTE: don't unbind texture
 
     @classmethod
-    def from_texture(cls, texture: Texture) -> TextureRenderer:
+    def from_texture(cls, texture: Texture) -> FrameBuffer2D:
         # TODO: get texture.is_compressed & internal_format first
         # -- that will help us pick shaders & extensions
         out = cls(
