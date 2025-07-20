@@ -1,0 +1,23 @@
+// created by snake-biscuits
+// used for testing bite
+"UnlitTwoTexture"
+{
+
+    "$basetexture" "dev\test_pattern"
+    "$texture2"  "models\tv/scanline"
+    
+    $surfaceprop "glass"
+               
+    "Proxies"
+    {
+        // TODO: add a VHS head stutter effect
+        "TextureScroll"
+        {
+            "textureScrollVar" "$basetexturetransform"
+            "textureScrollRate" 25
+            "textureScrollAngle" 0
+        }
+    }
+	
+
+}
