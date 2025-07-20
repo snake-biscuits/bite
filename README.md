@@ -1,4 +1,6 @@
-# **Bi**kkie's **Te**xture and Material Format Tool
+# bite
+
+Short for "**Bi**kkie's **Te**xture and Material Format Tool"
 
 Python library for parsing textures and materials for game modding
 
