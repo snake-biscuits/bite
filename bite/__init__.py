@@ -1,5 +1,5 @@
 __all__ = [
-    "base", "decode", "pixels", "utils",
+    "base", "decode", "pixel", "utils",
     "vmt",
     "dds", "pvr", "vtf",
     "Face", "Material", "MipIndex", "Size", "Texture",
@@ -9,7 +9,7 @@ __all__ = [
 # core
 from . import base
 from . import decode
-from . import pixels
+from . import pixel
 from . import utils
 # material formats
 from . import vmt
