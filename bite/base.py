@@ -149,6 +149,18 @@ class Texture:
         descriptor = f"'{self.filename}' {size} {len(self.mipmaps)} mipmaps"
         return f"<{self.__class__.__name__} {descriptor} @ 0x{id(self):016X}>"
 
+    # utilities
+    def default_index(self) -> MipIndex:
+        face = Face(0) if self.is_cubemap else None
+        return MipIndex(0, 0, face)
+
+    def mip_size(self, index: MipIndex) -> Size:
+        width, height = self.size
+        width >>= index.mip
+        height >>= index.mip
+        return (width, height)
+
+    # properties
     @property
     def is_cubemap(self):
         raise NotImplementedError()

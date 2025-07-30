@@ -36,7 +36,7 @@ bytes_per_pixel = {
 class TextureMode(enum.Enum):
     TWIDDLED = 0x01
     TWIDDLED_MIPS = 0x02
-    VQ = 0x03
+    VQ = 0x03  # Vector Quantization
     VQ_MIPS = 0x04
     PAL_4 = 0x05
     PAL_4_MIPS = 0x06
