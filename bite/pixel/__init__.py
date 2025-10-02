@@ -1,14 +1,22 @@
 __all__ = [
-    "base", "convert",
-    "Format"]
+    "base", "shuffle_rgb", "yuv",
+    "Channel", "Format",
+    "ARGB16_to_RGBA32",
+    "RGB24_to_RGBA32",
+    "RGB24_to_RGB565", "RGB565_to_RGB24",
+    # "RGB24_to_YUV", "YUV_to_RGB24"
+]
 
 from . import base
-from . import convert
-# TODO: colour spaces (YUV, Oklab)
-# -- https://en.wikipedia.org/wiki/Y%E2%80%B2UV
-# -- https://en.wikipedia.org/wiki/Oklab_color_space
-# NOTE: CSS Color Module Level 5 has custom colour spaces
-# -- https://drafts.csswg.org/css-color-5
-# -- css parsing & defaults will link us to svg_tool
+from . import shuffle_rgb
+# from . import yuv
 
-from .base import Format
+from .base import Channel, Format
+from .shuffle_rgb import (
+    ARGB16_to_RGBA32,
+    RGB24_to_RGBA32,
+    RGB24_to_RGB565,
+    RGB565_to_RGB24)
+# from .yuv import (
+#     RGB24_to_YUV,
+#     YUV_to_RGB24)

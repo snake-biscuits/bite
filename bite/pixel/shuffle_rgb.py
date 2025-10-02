@@ -1,6 +1,7 @@
 import numpy as np
 
 
+# TODO: inverse
 def ARGB16_to_RGBA32(raw_pixels: bytes) -> bytes:
     argb16 = np.frombuffer(raw_pixels, dtype=np.uint16)
     a = (argb16 >> 0x0) & 0x000F
@@ -39,3 +40,11 @@ def RGB565_to_RGB24(raw_pixels: bytes) -> bytes:
     rgb24[1::3] = g
     rgb24[2::3] = b
     return rgb24.tobytes()
+
+
+# TODO: inverse
+def RGB24_to_RGBA32(raw_pixel: bytes) -> bytes:
+    rgb24 = np.frombuffer(raw_pixel, dtype=np.uint8)
+    rgb24 = rgb24.reshape(rgb24.size // 3, 3)
+    rgba32 = np.insert(rgb24, 3, 0xFF, axis=1).flatten()
+    return rgba32.tobytes()
