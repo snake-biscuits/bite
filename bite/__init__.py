@@ -1,10 +1,10 @@
 __all__ = [
     "base", "decode", "pixel", "utils",
     "vmt",
-    "dds", "pvr", "vtf",
+    "dds", "pvr", "vms", "vtf",
     "Face", "Material", "MipIndex", "Size", "Texture",
     "VMT",
-    "DDS", "PVR", "VTF"]
+    "DDS", "PVR", "IconDataVMS", "VTF"]
 
 # core
 from . import base
@@ -16,6 +16,7 @@ from . import vmt
 # texture formats (includes flag enums etc.)
 from . import dds
 from . import pvr
+from . import vms
 from . import vtf
 # expose base
 from .base import Face, Material, MipIndex, Size, Texture
@@ -24,6 +25,7 @@ from .vmt import VMT
 # texture classes
 from .dds import DDS
 from .pvr import PVR
+from .vms import IconDataVMS
 from .vtf import VTF
 
 # extras
