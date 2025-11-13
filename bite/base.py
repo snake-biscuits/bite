@@ -145,7 +145,7 @@ class Texture:
 
     def __repr__(self) -> str:
         width, height = self.size
-        size = "{width}x{height}"
+        size = f"{width}x{height}"
         descriptor = f"'{self.filename}' {size} {len(self.mipmaps)} mipmaps"
         return f"<{self.__class__.__name__} {descriptor} @ 0x{id(self):016X}>"
 
