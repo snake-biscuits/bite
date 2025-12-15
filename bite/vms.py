@@ -6,8 +6,9 @@ from typing import List
 from PIL import Image
 from PIL import ImageOps
 
+from breki.binary import read_struct
+
 from . import base
-from .utils import read_struct
 
 
 class IconDataVMS(base.Texture):

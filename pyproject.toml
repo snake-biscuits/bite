@@ -32,6 +32,7 @@ classifiers = [
 ]
 
 dependencies = [
+    "breki @ git+https://git@github.com/snake-biscuits/breki.git",
     "numpy"
 ]
 
@@ -71,3 +72,7 @@ include = [
 
 [tool.hatch.build.targets.wheel]
 only-packages = true
+
+
+[tool.hatch.metadata]
+allow-direct-references = true

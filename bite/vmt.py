@@ -2,6 +2,8 @@ from __future__ import annotations
 import re
 from typing import Dict, List
 
+import breki
+
 from . import base
 
 
@@ -28,6 +30,7 @@ texture_parameters = {
     "$texture2": "multiply",
     # NOTE: texture2 is multiplied with basetexture in UnlitTwoTexture
     "%tooltexture": "editor"}
+# TODO: Role(enum.Enum)
 
 
 name_patterns = [
@@ -131,35 +134,32 @@ class Node:
                     prev_line = name
                 else:
                     prev_line = line
-        raise RuntimeError("reached EOF before node closed")
+        raise RuntimeError("ran out of lines before node closed")
 
 
-class VMT(base.Material):
-    is_text_based: bool = True
-    extension: str = "vmt"
-    shader: str
-    is_transparent: bool
-    textures: Dict[str, str]
-    # keep the top level node as reference
+class VMT(base.Material, breki.TextFile):
+    exts = ["*.vmt"]
+    # NOTE: top level node is kept for checking our work
     _raw: Node
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, filepath: str, archive=None, code_page=None):
+        super().__init__(filepath, archive, code_page)
         self._raw = Node()
 
-    @classmethod
-    def from_lines(cls, lines: List[str]) -> VMT:
-        out = cls()
-        out._raw = Node.from_lines(lines)
-        out.shader = out._raw.name
+    def parse(self):
+        if self.is_parsed:
+            return
+        self.is_parsed = True
+        # parse root node
+        self._raw = Node.from_lines(self.stream.readlines())
+        self.shader = self._raw.name
         # parameters -> textures
         for parameter, role in texture_parameters.items():
-            if parameter in out._raw.parameters:
-                texture_path = out._raw.parameters[parameter]
+            if parameter in self._raw.parameters:
+                texture_path = self._raw.parameters[parameter]
                 texture_path = texture_path.lower().replace("\\", "/")
-                out.textures[role] = texture_path
+                self.textures[role] = texture_path
         # parameters -> flags
-        translucent = out._raw.parameters.get("$translucent", "0")
-        alphatest = out._raw.parameters.get("$alphatest", "0")
-        out.is_transparent == "1" in (translucent, alphatest)
-        return out
+        translucent = self._raw.parameters.get("$translucent", "0")
+        alphatest = self._raw.parameters.get("$alphatest", "0")
+        self.is_transparent == "1" in (translucent, alphatest)

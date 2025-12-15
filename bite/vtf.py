@@ -7,8 +7,11 @@ import math
 import struct
 from typing import Any, Dict, List, Tuple, Union
 
+import breki
+from breki.binary import read_struct, write_struct
+from breki.files.parsed import parse_first
+
 from . import base
-from .utils import read_struct, write_struct
 
 
 class Format(enum.Enum):
@@ -142,37 +145,58 @@ class Resource:
     def __repr__(self) -> str:
         tag_type = self.valid_tags[self.tag]
         if self.tag == b"CRC":
-            return f"<Resource | {tag_type} checksum=0x{self.checksum:08X}>"
+            args = f"checksum=0x{self.checksum:08X}>"
         else:
-            return f"<Resource | {tag_type} flags=0x{self.flags:02X} offset={self.offset}>"
+            args = f"flags=0x{self.flags:02X} offset={self.offset}>"
+        return f"<Resource | {tag_type} {args}>"
 
     @classmethod
     def from_stream(cls, stream: io.BytesIO) -> Resource:
         return cls(*read_struct(stream, "3sBI"))
 
     def as_bytes(self) -> bytes:
-        return struct.pack("3sBI", self.tag, self.flags, self.offset)
+        if self.tag == b"CRC":
+            flags, offset = 0x02, self.checksum
+        else:
+            flags, offset = self.flags, self.offset
+        return struct.pack("3sBI", self.tag, flags, offset)
 
 
-class VTF(base.Texture):
-    extension: str = "vtf"
-    folder: str
-    filename: str
-    # header
+class VtfHeader(breki.Struct):
+    magic: bytes  # b"VTF\0"
     version: Tuple[int, int]  # major, minor
-    size: base.Size
+    header_size: int  # in bytes, includes resources
+    size: Tuple[int, int]  # width, height
     flags: Flags
     num_frames: int
     first_frame: int
     reflectivity: Tuple[float, float, float]  # rgb
     bumpmap_scale: int
     format: Format
-    num_mipmaps: int
-    low_res_format: Format
-    low_res_size: base.Size
+    __slots__ = [
+        "magic", "version", "header_size", "size",
+        "flags", "num_frames", "first_frame",
+        "padding_1", "reflectivity", "padding_2",
+        "bumpmap_scale", "format"]
+    _format = "4s3I2HI2H4s3f4sfI"
+    _arrays = {
+        "version": ["major", "minor"],
+        "size": ["width", "height"],
+        "reflectivity": [*"rgb"]}
+    _classes = {
+        "flags": Flags,
+        "format": Format}
+
+
+class Vtf(base.Texture, breki.BinaryFile):
+    exts = ["*.vtf"]
+    # header
+    header: VtfHeader
     resources: List[Resource]
     cma: Union[None, CMA]
-    # pixel data
+    # essentials
+    size: base.Size
+    num_frames: int
     mipmaps: Dict[base.MipIndex, bytes]
     # ^ {MipIndex(mip, frame, face): b"raw_mipmap"}
     raw_data: Union[None, bytes]
@@ -180,95 +204,98 @@ class VTF(base.Texture):
     as_json: Dict[str, Any]
     is_cubemap: bool
 
-    def __init__(self):
-        super().__init__()
-        # defaults
-        self.version = (7, 5)
-        self.format = Format.NONE
-        self.flags = Flags(0x00)  # self.flags.name will be a blank string
+    def __init__(self, filepath: str, archive=None, code_page=None):
+        super().__init__(filepath, archive, code_page)
+        # TODO: default header
         self.cma = None
+        self.header = None
+        self.resources = list()
 
+    @parse_first
     def __repr__(self) -> str:
-        major, minor = self.version
+        major, minor = self.header.version
         version = f"v{major}.{minor}"
         width, height = self.size
         size = f"{width}x{height}"
-        return f"<VTF {version} '{self.filename}' {size} {self.format.name} flags={self.flags.name}>"
+        format_ = self.header.format
+        flags = self.header.flags
+        return f"<VTF {version} '{self.filename}' {size} {format_.name} flags={flags.name}>"
 
-    @classmethod
-    def from_stream(cls, stream: io.BytesIO) -> VTF:
-        out = cls()
-        assert stream.read(4) == b"VTF\0"
-        out.version = read_struct(stream, "2I")
-        if out.version != (7, 5):
-            raise NotImplementedError(f"v{out.version[0]}.{out.version[1]} is not supported!")
-        header_size = read_struct(stream, "I")
-        out.size = read_struct(stream, "2H")
-        out.flags = Flags(read_struct(stream, "I"))
-        out.num_frames, out.first_frame = read_struct(stream, "2H")
-        assert stream.read(4) == b"\0" * 4
-        out.reflectivity = read_struct(stream, "3f")
-        assert stream.read(4) == b"\0" * 4
-        out.bumpmap_scale = read_struct(stream, "f")
-        out.format = Format(read_struct(stream, "I"))
-        out.num_mipmaps = read_struct(stream, "B")
-        out.low_res_format = Format(read_struct(stream, "i"))
-        out.low_res_size = read_struct(stream, "2B")
-        # v7.2+
-        out.mipmap_depth = read_struct(stream, "H")
-        # v7.3+
-        assert stream.read(3) == b"\0" * 3
-        num_resources = read_struct(stream, "I")
-        assert stream.read(8) == b"\0" * 8
-        resources = [
-            Resource.from_stream(stream)
-            for i in range(num_resources)]
-        out.resources = {
-            Resource.valid_tags[resource.tag]: resource
-            for resource in resources}
-        assert stream.tell() == header_size
+    def parse(self):
+        if self.is_parsed:
+            return
+        self.is_parsed = True
+        assert self.stream.read(4) == b"VTF\0"
+        major, minor = read_struct(self.stream, "2I")  # format version
+        if major != 7 or minor > 5:
+            raise NotImplementedError(f"Vtf v{major}.{minor} is not supported!")
+        self.stream.seek(-12, 1)
+        self.header = VtfHeader.from_stream(self.stream)
+        assert self.header.padding_1 == b"\0" * 4
+        assert self.header.padding_2 == b"\0" * 4
+        # expose the essentials
+        self.size = tuple(self.header.size)
+        self.num_frames = self.header.num_frames
+        # funky alignment
+        self.num_mipmaps = read_struct(self.stream, "B")
+        self.low_res_format = Format(read_struct(self.stream, "i"))
+        self.low_res_size = read_struct(self.stream, "2B")
+        if minor >= 2:  # v7.2+
+            self.mipmap_depth = read_struct(self.stream, "H")
+        if minor >= 3:  # v7.3+
+            assert self.stream.read(3) == b"\0" * 3
+            num_resources = read_struct(self.stream, "I")
+            assert self.stream.read(8) == b"\0" * 8
+            resources = [
+                Resource.from_stream(self.stream)
+                for i in range(num_resources)]
+            self.resources = {
+                Resource.valid_tags[resource.tag]: resource
+                for resource in resources}
+        assert self.stream.tell() == self.header.header_size
         # CMA
-        if "Cubemap Multiply Ambient" in out.resources:
-            out.cma = CMA.from_vtf_stream(out, stream)
-            stream.seek(header_size)
+        if "Cubemap Multiply Ambient" in self.resources:
+            self.cma = CMA.from_vtf_stream(self, self.stream)
+            self.stream.seek(self.header.header_size)
         # check assumptions
+        assert self.header.first_frame == 0
         # TODO: handle low res "thumbnail"
-        assert out.low_res_format == Format.NONE
-        assert out.low_res_size == (0, 0)
-        assert out.first_frame == 0
+        # -- will need a special MipIndex / key
+        assert self.low_res_format == Format.NONE
+        assert self.low_res_size == (0, 0)
         # seek to start of mipmaps
-        if "Image Data" in out.resources:
-            stream.seek(out.resources["Image Data"].offset)
+        if "Image Data" in self.resources:
+            self.stream.seek(self.resources["Image Data"].offset)
         else:
             raise RuntimeError(
                 "Can't locate mipmaps without 'Image Data' resource")
         # calculate mip_sizes
-        width, height = out.size
+        width, height = self.size
         try:
-            bpp = bytes_per_pixel[out.format]
+            bpp = bytes_per_pixel[self.header.format]
         except KeyError:
-            # TODO: UserWarning(f"Unknown bpp for format: {out.format.name}")
-            out.raw_data = stream.read()
-            return out
-        mbs = min_block_size.get(out.format, 0)
+            # TODO: UserWarning(f"Unknown bpp for format: {self.format.name}")
+            self.raw_data = self.stream.read()
+            return
+        mbs = min_block_size.get(self.header.format, 0)
         mip_sizes = [
             max(math.ceil((width >> i) * (height >> i) * bpp), mbs)
-            for i in range(out.num_mipmaps)]
+            for i in range(self.num_mipmaps)]
         # read mipmaps
-        if out.is_cubemap:
-            out.mipmaps = {
-                base.MipIndex(mip, frame, face): stream.read(mip_size)
+        if self.is_cubemap:
+            self.mipmaps = {
+                base.MipIndex(mip, frame, face): self.stream.read(mip_size)
                 for mip, mip_size in reversed([*enumerate(mip_sizes)])
-                for frame in range(out.num_frames)
+                for frame in range(self.num_frames)
                 for face in base.Face}
         else:
-            out.mipmaps = {
-                base.MipIndex(mip, frame, None): stream.read(mip_size)
+            self.mipmaps = {
+                base.MipIndex(mip, frame, None): self.stream.read(mip_size)
                 for mip, mip_size in reversed([*enumerate(mip_sizes)])
-                for frame in range(out.num_frames)}
-        return out
+                for frame in range(self.num_frames)}
 
     @property
+    @parse_first
     def as_json(self) -> Dict[str, Any]:
         return {
             "version": self.version,
@@ -287,24 +314,17 @@ class VTF(base.Texture):
             "cma": self.cma.as_json if self.cma is not None else None}
 
     @property
+    @parse_first
     def is_cubemap(self) -> bool:
-        return Flags.ENVMAP in self.flags
+        return Flags.ENVMAP in self.header.flags
 
+    @parse_first
     def as_bytes(self) -> bytes:
         stream = io.BytesIO()
         # header
-        stream.write(b"VTF\0")
-        write_struct(stream, "2I", *self.version)
         header_size = 80 + len(self.resources) * 8
-        write_struct(stream, "I", header_size)
-        write_struct(stream, "2H", *self.size)
-        write_struct(stream, "I", self.flags.value)
-        write_struct(stream, "2H", self.num_frames, self.first_frame)
-        stream.write(b"\0" * 4)
-        write_struct(stream, "3f", *self.reflectivity)
-        stream.write(b"\0" * 4)
-        write_struct(stream, "f", self.bumpmap_scale)
-        write_struct(stream, "I", self.format.value)
+        self.header.header_size = header_size
+        stream.write(self.header.as_bytes())
         write_struct(stream, "B", self.num_mipmaps)
         write_struct(stream, "i", self.low_res_format.value)
         write_struct(stream, "2B", *self.low_res_size)
@@ -342,7 +362,8 @@ class VTF(base.Texture):
         # mip data
         assert "Image Data" in self.resources
         assert self.resources["Image Data"].offset == stream.tell()
-        assert Flags.ENVMAP in self.flags
+        # TODO: check .is_cubemap & use alternate packing
+        assert Flags.ENVMAP in self.header.flags
         if isinstance(self.raw_data, bytes):
             stream.write(self.raw_data)
         else:
@@ -378,15 +399,15 @@ class CMA:
         return out
 
     @classmethod
-    def from_vtf_stream(cls, vtf: VTF, vtf_file: io.BytesIO):
+    def from_vtf_stream(cls, vtf: Vtf, stream: io.BytesIO):
         resource = vtf.resources["Cubemap Multiply Ambient"]
         out = cls()
         if resource.flags == 0x02:  # single entry saved in offset
             raw_cma = struct.pack("I", resource.offset)
             out.data = struct.unpack("f", raw_cma)
         else:
-            vtf_file.seek(resource.offset)
-            size, *out.data = read_struct(vtf_file, f"I{vtf.num_frames}f")
+            stream.seek(resource.offset)
+            size, *out.data = read_struct(stream, f"I{vtf.num_frames}f")
             assert size == vtf.num_frames * 4
         return out
 

@@ -1,8 +1,8 @@
 from __future__ import annotations
 import enum
-import io
-import os
-from typing import Dict, List, Tuple, Union
+from typing import Dict, Tuple, Union
+
+import breki
 
 
 Size = Tuple[int, int]
@@ -20,11 +20,7 @@ class Face(enum.Enum):
     BACK = 5  # Z-
 
 
-class Material:
-    is_text_based: bool = True
-    extension: str = "ext"
-    folder: str
-    filename: str
+class Material(breki.ParsedFile):
     # metadata
     shader: str
     is_transparent: bool
@@ -32,9 +28,8 @@ class Material:
     textures: Dict[str, str]
     # ^ {"role": "path"}
 
-    def __init__(self):
-        self.folder = ""
-        self.filename = f"untitled.{self.extension}"
+    def __init__(self, filepath: str, archive=None, code_page=None):
+        super().__init__(filepath, archive, code_page)
         self.shader = None
         self.is_transparent = False
         self.textures = dict()
@@ -45,46 +40,6 @@ class Material:
             f"{self.shader}",
             f"{len(self.textures)} textures"])
         return f"<{self.__class__.__name__} {descriptor} @ 0x{id(self):016X}>"
-
-    # read
-    @classmethod
-    def from_bytes(cls, raw_data: bytes) -> Material:
-        return cls.from_stream(io.BytesIO(raw_data))
-
-    @classmethod
-    def from_file(cls, path: str) -> Material:
-        if cls.is_text_based:
-            with open(path, "r") as txt_file:
-                out = cls.from_lines(txt_file.readlines())
-        else:
-            with open(path, "rb") as bin_file:
-                out = cls.from_stream(bin_file)
-        out.folder, out.filename = os.path.split(path)
-        return out
-
-    @classmethod
-    def from_lines(cls, lines: List[str]) -> Material:
-        raise NotImplementedError()
-
-    @classmethod
-    def from_stream(cls, stream: io.BytesIO) -> Material:
-        raise NotImplementedError()
-
-    # write
-    # TODO: as_lines if cls.is_text_based
-    def as_bytes(self) -> bytes:
-        raise NotImplementedError()
-
-    def save(self):
-        path = os.path.join(self.folder, self.filename)
-        self.save_as(path)
-
-    def save_as(self, path: str):
-        out = self.as_bytes()
-        folder = os.path.dirname(path)
-        os.makedirs(folder, exist_ok=True)
-        with open(path, "wb") as texture_file:
-            texture_file.write(out)
 
 
 class MipIndex:
@@ -117,12 +72,10 @@ class MipIndex:
         return iter((self.mip, self.frame, self.face))
 
 
-class Texture:
-    extension: str = "ext"
-    folder: str
-    filename: str
+class Texture(breki.ParsedFile):
     # header
     size: Tuple[int, int]  # dimensions of largest mipmap
+    # NOTE: conflicts with ParsedFile.size (filesize in bytes)
     num_mipmaps: int
     num_frames: int
     # data
@@ -134,9 +87,8 @@ class Texture:
     # properties
     is_cubemap: bool
 
-    def __init__(self):
-        self.folder = ""
-        self.filename = f"untitled.{self.extension}"
+    def __init__(self, filepath: str, archive=None, code_page=None):
+        super().__init__(filepath, archive, code_page)
         self.mipmaps = dict()
         self.raw_data = None
         self.size = (0, 0)
@@ -164,34 +116,3 @@ class Texture:
     @property
     def is_cubemap(self):
         raise NotImplementedError()
-
-    # read
-    @classmethod
-    def from_bytes(cls, raw_data: bytes) -> Texture:
-        return cls.from_stream(io.BytesIO(raw_data))
-
-    @classmethod
-    def from_file(cls, path: str) -> Texture:
-        with open(path, "rb") as texture_file:
-            out = cls.from_stream(texture_file)
-        out.folder, out.filename = os.path.split(path)
-        return out
-
-    @classmethod
-    def from_stream(cls, stream: io.BytesIO) -> Texture:
-        raise NotImplementedError()
-
-    # write
-    def as_bytes(self) -> bytes:
-        raise NotImplementedError()
-
-    def save(self):
-        path = os.path.join(self.folder, self.filename)
-        self.save_as(path)
-
-    def save_as(self, path: str):
-        out = self.as_bytes()
-        folder = os.path.dirname(path)
-        os.makedirs(folder, exist_ok=True)
-        with open(path, "wb") as texture_file:
-            texture_file.write(out)

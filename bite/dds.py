@@ -3,201 +3,14 @@
 # https://learn.microsoft.com/en-us/windows/win32/direct3ddds/dds-header
 from __future__ import annotations
 import enum
-import io
 import math
 import os
 from typing import Dict, List, Union
 
+import breki
+from breki.files.parsed import parse_first
+
 from . import base
-from .utils import read_struct, write_struct
-
-
-class DDS(base.Texture):
-    extension: str = "dds"
-    folder: str
-    filename: str
-    # header
-    flags: int  # TODO: enum.IntFlag
-    size: base.Size
-    num_mipmaps: int
-    # DX10 extended header
-    format: DXGI
-    dimension: int
-    misc_flag: MiscFlag
-    alpha_flag: AlphaFlag
-    array_size: int
-    # pixel data
-    mipmaps: Dict[base.MipIndex, bytes]
-    # ^ {MipIndex(mip, frame, face): raw_mipmap_data}
-    raw_data: Union[bytes, None]  # if mipmaps cannot be split
-    # properties
-    is_cubemap: bool
-    num_frames: int
-
-    def __init__(self):
-        # defaults
-        self.alpha_flag = AlphaFlag.STRAIGHT
-        self.array_size = 1
-        self.dimension = Dimension.TEXTURE_2D
-        self.flags = Flags(0x000A1007)
-        self.format = DXGI.RGBA_8888_UNORM
-        self.misc_flag = MiscFlag(0)
-        self.num_mipmaps = 0
-        # NOTE: misc_flag must be set before num_frames
-        super().__init__()
-
-    def __repr__(self) -> str:
-        width, height = self.size
-        size = f"{width}x{height}"
-        return f"<DDS '{self.filename}' {size} {self.format.name}>"
-
-    def split(self) -> List[DDS]:
-        """separate a cubemap array into multiple files"""
-        # TODO: options for how to split
-        # TODO: make header copying universal
-        # -- then we could move this method to base.Texture
-        out = list()
-        base_filename = os.path.splitext(self.filename)[0]
-        is_cubemap = self.is_cubemap
-        for i in range(self.num_frames):
-            child = DDS()
-            child.alpha_flag = self.alpha_flag
-            child.array_size = 6 if is_cubemap else 1
-            child.dimension = self.dimension
-            child.filename = f"{base_filename}.{i}.dds"
-            child.flags = self.flags
-            child.format = self.format
-            child.misc_flag = self.misc_flag
-            child.num_mipmaps = self.num_mipmaps
-            child.size = self.size
-            if is_cubemap:
-                indices = {
-                    (mip, face): base.MipIndex(mip, i, base.Face(face))
-                    for mip in range(self.num_mipmaps)
-                    for face in range(6)}
-            else:
-                indices = {
-                    (mip, None): base.MipIndex(mip, i, None)
-                    for mip in range(self.num_mipmaps)}
-            child.mipmaps = {
-                base.MipIndex(mip, 0, face): self.mipmaps[index]
-                for (mip, face), index in indices.items()}
-            out.append(child)
-        return out
-
-    @property
-    def is_cubemap(self) -> bool:
-        # return bool(self.misc_flag & MiscFlag.CUBEMAP)
-        return self.dimension == Dimension.TEXTURE_2D
-
-    @property
-    def num_frames(self) -> int:
-        if self.is_cubemap:
-            return self.array_size // 6
-        else:
-            return self.array_size
-
-    @num_frames.setter
-    def num_frames(self, value: int):
-        if self.is_cubemap:
-            self.array_size = value * 6
-        else:
-            self.array_size = value
-
-    @classmethod
-    def from_stream(cls, stream: io.BytesIO) -> DDS:
-        out = cls()
-        # header
-        assert stream.read(4) == b"DDS "
-        assert read_struct(stream, "I") == 0x7C  # header size
-        out.flags = Flags(read_struct(stream, "I"))
-        out.size = read_struct(stream, "2I")
-        # pitch / linsize & depth
-        assert read_struct(stream, "2I") == (0x00010000, 0x01)  # pitch / linsize?
-        out.num_mipmaps = read_struct(stream, "I")
-        assert stream.read(44) == b"\0" * 44  # reserved
-        assert read_struct(stream, "2I") == (0x20, 0x04)  # pixelformat
-        magic = stream.read(4)
-        if magic == b"DX10":  # DX10 extended header
-            assert stream.read(20) == b"\0" * 20
-            assert read_struct(stream, "I") == 0x00401008  # idk, some flags?
-            assert stream.read(16) == b"\0" * 16
-            out.format = DXGI(read_struct(stream, "I"))
-            out.dimension = Dimension(read_struct(stream, "I"))
-            out.misc_flag = MiscFlag(read_struct(stream, "I"))
-            out.array_size = read_struct(stream, "I")
-            out.alpha_flag = AlphaFlag(read_struct(stream, "I"))
-        else:
-            # TODO: magic -> format
-            # -- b"BC4U" -> DXGI.BC4_UNORM
-            # TODO: dimension, misc_flag & array_size
-            raise NotImplementedError("")
-        # calculate mip_sizes
-        width, height = out.size
-        try:
-            bpp = bytes_per_pixel[out.format]
-        except KeyError:
-            # TODO: UserWarning(f"Unknown bpp for format: {out.format.name}")
-            out.raw_data = stream.read()
-            return out
-        mbs = min_block_size.get(out.format, 0)
-        mip_sizes = [
-            max(math.ceil((width >> i) * (height >> i) * bpp), mbs)
-            for i in range(out.num_mipmaps)]
-        # read mipmaps
-        if out.is_cubemap:
-            assert out.array_size % 6 == 0
-            out.mipmaps = {
-                base.MipIndex(mip, frame, face): stream.read(mip_size)
-                for frame in range(out.num_frames)
-                for face in base.Face
-                for mip, mip_size in enumerate(mip_sizes)}
-        else:
-            out.mipmaps = {
-                base.MipIndex(mip, frame, None): stream.read(mip_size)
-                for frame in range(out.num_faces)
-                for mip, mip_size in enumerate(mip_sizes)}
-        return out
-
-    def as_bytes(self) -> bytes:
-        stream = io.BytesIO()
-        # header
-        write_struct(stream, "4s", b"DDS ")
-        write_struct(stream, "I", 0x7C)
-        write_struct(stream, "I", self.flags.value)
-        write_struct(stream, "2I", *self.size)
-        write_struct(stream, "2I", 0x00010000, 0x01)  # pitch / linsize?
-        write_struct(stream, "I", self.num_mipmaps)
-        write_struct(stream, "44s", b"\0" * 44)
-        write_struct(stream, "2I", 0x20, 0x04)  # don't know, don't care
-        # DX10 extended header
-        write_struct(stream, "4s", b"DX10")
-        write_struct(stream, "20s", b"\0" * 20)
-        write_struct(stream, "I", 0x00401008)  # idk, some flags?
-        write_struct(stream, "16s", b"\0" * 16)
-        write_struct(stream, "I", self.format.value)
-        write_struct(stream, "I", self.dimension.value)
-        write_struct(stream, "I", self.misc_flag.value)
-        write_struct(stream, "I", self.array_size)
-        write_struct(stream, "I", self.alpha_flag.value)
-        # mip data
-        if isinstance(self.raw_data, bytes):
-            stream.write(self.raw_data)
-        else:
-            if self.is_cubemap:
-                stream.write(b"".join([
-                    self.mipmaps[base.MipIndex(mip, frame, face)]
-                    for frame in range(self.num_frames)
-                    for face in base.Face
-                    for mip in reversed(range(self.num_mipmaps))]))
-            else:
-                stream.write(b"".join([
-                    self.mipmaps[base.MipIndex(mip, frame)]
-                    for frame in range(self.num_frames)
-                    for mip in reversed(range(self.num_mipmaps))]))
-        # stream -> bytes
-        stream.seek(0)
-        return stream.read()
 
 
 # formats
@@ -332,6 +145,12 @@ class DXGI(enum.Enum):
     FORCE_UINT = 0xFFFFFFFF
 
 
+dxgi_from_magic = {
+    b"BC4U": DXGI.BC4_UNORM,
+    b"BC5U": DXGI.BC5_UNORM,
+    b"DXT1": DXGI.BC1_UNORM}
+
+
 bytes_per_pixel = {
     **{F: 4 for F in (
         DXGI.R_32_TYPELESS, DXGI.D_32_FLOAT, DXGI.R_32_FLOAT,
@@ -371,9 +190,9 @@ bytes_per_pixel = {
     **{BC: 1 for BC in (
         DXGI.BC3_TYPELESS, DXGI.BC3_UNORM, DXGI.BC3_UNORM_SRGB,
         DXGI.BC5_TYPELESS, DXGI.BC5_UNORM, DXGI.BC5_SNORM,
-        DXGI.BC6H_TYPELESS, DXGI.BC6H_UF16, DXGI.BC6H_SF16)},
+        DXGI.BC6H_TYPELESS, DXGI.BC6H_UF16, DXGI.BC6H_SF16,
+        DXGI.BC7_TYPELESS, DXGI.BC7_UNORM, DXGI.BC7_UNORM_SRGB)},
     # TODO: BC4
-    # TODO: BC7
     DXGI.BGR_565_UNORM: 2,
     DXGI.BGRA_5551_UNORM: 2,
     **{BGRX: 4 for BGRX in (
@@ -389,11 +208,12 @@ min_block_size = {
     DXGI.R_1_UNORM: 1,
     **{BC1: 8 for BC1 in (  # DXT1
         DXGI.BC1_TYPELESS, DXGI.BC1_UNORM, DXGI.BC1_UNORM_SRGB)},
-    # TODO: BC2, 4 & 7
+    # TODO: BC2 & 4
     **{BC: 16 for BC in (
         DXGI.BC3_TYPELESS, DXGI.BC3_UNORM, DXGI.BC3_UNORM_SRGB,
         DXGI.BC5_TYPELESS, DXGI.BC5_UNORM, DXGI.BC5_SNORM,
-        DXGI.BC6H_TYPELESS, DXGI.BC6H_UF16, DXGI.BC6H_SF16)}}
+        DXGI.BC6H_TYPELESS, DXGI.BC6H_UF16, DXGI.BC6H_SF16,
+        DXGI.BC7_TYPELESS, DXGI.BC7_UNORM, DXGI.BC7_UNORM_SRGB)}}
 
 
 # flag enums
@@ -406,6 +226,7 @@ class AlphaFlag(enum.IntFlag):
 
 
 class Dimension(enum.Enum):
+    INVALID = 0x00  # nessecary for dummy header_2
     TEXTURE_1D = 0x02  # width
     TEXTURE_2D = 0x03  # width x height
     TEXTURE_3D = 0x04  # width x height x depth
@@ -424,3 +245,199 @@ class Flags(enum.IntFlag):
 
 class MiscFlag(enum.IntFlag):
     CUBEMAP = 0x04
+
+
+class DdsHeader(breki.Struct):
+    magic: bytes  # b"DDS "
+    header_size: int  # in bytes, typically 0x7C
+    flags: Flags
+    size: List[int]
+    pitch_or_linear_size: int
+    depth: int
+    num_mipmaps: int
+    reserved: bytes  # 44 empty bytes
+    pixel_format: List[int]
+    __slots__ = [
+        "magic", "header_size", "flags", "size",
+        "pitch_or_linear_size", "depth",
+        "num_mipmaps", "reserved", "pixel_format"]
+    _format = "4s7I44s2I"
+    _arrays = {"size": ["width", "height"], "pixel_format": 2}
+    _classes = {"flags": Flags}
+
+
+class DX10Header(breki.Struct):
+    magic: bytes  # b"DX10"
+    reserved_1: bytes  # 20 empty bytes
+    unknown: int  # flags? usually 0x00401008
+    reserved_2: bytes  # 16 empty bytes
+    format: DXGI
+    dimension: Dimension
+    misc_flag: MiscFlag
+    array_size: int
+    alpha_flag: AlphaFlag
+    __slots__ = [
+        "magic", "reserved_1", "unknown", "reserved_2",
+        "format", "dimension", "misc_flag", "array_size",
+        "alpha_flag"]
+    _format = "4s20sI16s5I"
+    _classes = {
+        "format": DXGI, "dimension": Dimension,
+        "misc_flag": MiscFlag, "alpha_flag": AlphaFlag}
+
+
+class Dds(base.Texture, breki.BinaryFile):
+    exts = ["*.dds"]
+    header: DdsHeader
+    header_2: DX10Header
+    # pixel data
+    mipmaps: Dict[base.MipIndex, bytes]
+    # ^ {MipIndex(mip, frame, face): raw_mipmap_data}
+    raw_data: Union[bytes, None]  # if mipmaps cannot be split
+    # properties
+    is_cubemap: bool
+    num_frames: int
+
+    def __init__(self, filepath: str, archive=None, code_page=None):
+        self.header = None
+        self.header_2 = None
+        self.raw_data = None
+        super().__init__(filepath, archive, code_page)
+
+    @parse_first
+    def __repr__(self) -> str:
+        if self.header is not None:
+            width, height = self.header.size
+            size = f"{width}x{height}"
+            dxgi = self.header_2.format
+            return f"<DDS '{self.filename}' {size} {dxgi.name}>"
+        else:
+            return f"<DDS '{self.filename}' with no header>"
+
+    @parse_first
+    def split(self) -> List[Dds]:
+        """separate a cubemap array into multiple files"""
+        assert self.header is not None
+        assert self.header_2 is not None
+        out = list()
+        base_filename = os.path.splitext(self.filename)[0]
+        is_cubemap = self.is_cubemap
+        for i in range(self.num_frames):
+            child = Dds()
+            child.is_parsed = True
+            child.filename = f"{base_filename}.{i}.dds"
+            child.header = self.header
+            child.header_2 = self.header_2
+            if is_cubemap:
+                child.header_2.array_size = 6
+                indices = {
+                    (mip, face): base.MipIndex(mip, i, base.Face(face))
+                    for mip in range(self.num_mipmaps)
+                    for face in range(6)}
+            else:
+                child.header_2.array_size = 1
+                indices = {
+                    (mip, None): base.MipIndex(mip, i, None)
+                    for mip in range(self.num_mipmaps)}
+            child.mipmaps = {
+                base.MipIndex(mip, 0, face): self.mipmaps[index]
+                for (mip, face), index in indices.items()}
+            out.append(child)
+        return out
+
+    @property
+    @parse_first
+    def is_cubemap(self) -> bool:
+        # NOTE: Apex Legends Cubemap Arrays don't set the cubemap flag
+        if self.header_2.array_size % 6 == 0:
+            return self.header_2.dimension == Dimension.TEXTURE_2D
+        else:
+            return MiscFlag.CUBEMAP in self.header_2.misc_flag
+
+    def parse(self):
+        if self.is_parsed:
+            return
+        self.is_parsed = True
+        # header
+        self.header = DdsHeader.from_stream(self.stream)
+        assert self.header.magic == b"DDS "
+        assert self.header.header_size == 0x7C
+        # assert self.header.pitch_or_linear_size == 0x00010000
+        # assert self.header.depth == 0x01
+        assert self.header.reserved == b"\0" * 44
+        assert self.header.pixel_format == (0x20, 0x04)
+        magic = self.stream.read(4)
+        if magic == b"DX10":  # DX10 extended header
+            self.stream.seek(-4, 1)
+            self.header_2 = DX10Header.from_stream(self.stream)
+            assert self.header_2.reserved_1 == b"\0" * 20
+            # assert self.header_2.unknown == 0x00401008
+            assert self.header_2.reserved_2 == b"\0" * 16
+        else:  # magic -> dummy header_2
+            dxgi = dxgi_from_magic[magic]
+            self.header_2 = DX10Header(
+                dimension=Dimension.TEXTURE_2D,
+                misc_flag=MiscFlag(0),
+                array_size=1)
+        # expose the essentials
+        self.size = tuple(self.header.size)
+        self.num_mipmaps = self.header.num_mipmaps
+        self.num_frames = self.header_2.array_size
+        if self.is_cubemap:
+            assert self.num_frames % 6 == 0
+            self.num_frames = self.num_frames // 6
+        # calculate mip_sizes
+        width, height = self.size
+        dxgi = self.header_2.format
+        try:
+            bpp = bytes_per_pixel[dxgi]
+        except KeyError:
+            # TODO: UserWarning(f"Unknown bpp for format: {dxgi.name}")
+            self.raw_data = self.stream.read()
+            return
+        mbs = min_block_size.get(dxgi, 0)
+        mip_sizes = [
+            max(math.ceil((width >> i) * (height >> i) * bpp), mbs)
+            for i in range(self.num_mipmaps)]
+        # read mipmaps
+        if self.is_cubemap:
+            self.mipmaps = {
+                base.MipIndex(mip, frame, face): self.stream.read(mip_size)
+                for frame in range(self.num_frames)
+                for face in base.Face
+                for mip, mip_size in enumerate(mip_sizes)}
+        else:
+            self.mipmaps = {
+                base.MipIndex(mip, frame, None): self.stream.read(mip_size)
+                for frame in range(self.num_frames)
+                for mip, mip_size in enumerate(mip_sizes)}
+
+    @parse_first
+    def as_bytes(self) -> bytes:
+        assert self.header is not None
+        assert self.header_2 is not None
+        # headers
+        out = [self.header.as_bytes()]
+        if self.header_2.magic == b"DX10":
+            out.append(self.header_2.as_bytes())
+        else:  # header_2 is fake
+            dxgi_magic = {
+                dxgi: magic
+                for magic, dxgi in dxgi_from_magic.items()}
+            out.append(dxgi_magic[self.header_2.format])
+        # mip data
+        if isinstance(self.raw_data, bytes):
+            out.append(self.raw_data)
+        else:
+            if self.is_cubemap:
+                out.extend([
+                    self.mipmaps[base.MipIndex(mip, frame, face)]
+                    for frame in range(self.num_frames)
+                    for face in base.Face
+                    for mip in reversed(range(self.num_mipmaps))])
+            else:
+                out.extend([
+                    self.mipmaps[base.MipIndex(mip, frame)]
+                    for frame in range(self.array_size)
+                    for mip in reversed(range(self.num_mipmaps))])
+        return b"".join(out)

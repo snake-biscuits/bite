@@ -7,8 +7,9 @@ import io
 import math
 from typing import Dict, Union
 
+from breki.binary import read_struct, write_struct
+
 from . import base
-from .utils import read_struct, write_struct
 
 
 class PixelMode(enum.Enum):
