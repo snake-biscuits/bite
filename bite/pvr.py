@@ -5,9 +5,11 @@ from __future__ import annotations
 import enum
 import io
 import math
-from typing import Dict, Union
+from typing import Union
 
+import breki
 from breki.binary import read_struct, write_struct
+from breki.files.parsed import parse_first
 
 from . import base
 
@@ -77,79 +79,71 @@ class Format:
         return "_".join([self.pixel.name, self.texture.name])
 
 
-class PVR(base.Texture):
-    extension: str = "pvr"
-    folder: str
-    filename: str
+class Pvr(base.Texture, breki.BinaryFile):
+    exts = ["*.pvr"]
+    # essentials
+    is_cubemap: bool = property(lambda s: False)
     # header
     gbix: Union[bytes, None]
-    data_size: int
+    data_size: int  # preserved for debugging
     format: Format
-    size: base.Size
-    # pixel data
-    mipmaps: Dict[base.MipIndex, bytes]
-    # ^ {(mip_index, cubemap_index, side_index): b"raw_mipmap"}
-    raw_data: Union[bytes, None]  # if mipmaps cannot be split
-    # properties
-    is_cubemap: bool = property(lambda s: False)
-    num_mipmaps: int
-    num_frames: int
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, filepath: str, archive=None, code_page=None):
+        super().__init__(filepath, archive, code_page)
         # defaults
         self.gbix = None
         self.data_size = 8
         self.format = Format(PixelMode(0), TextureMode(1))
+        self.num_frames = 1
+        self.num_mipmaps = 1
 
+    @parse_first
     def __repr__(self) -> str:
-        width, height = self.size
+        width, height = self.max_size
         size = f"{width}x{height}"
         return f"<PVR '{self.filename}' {size} {self.format.name}>"
 
-    @classmethod
-    def from_stream(cls, stream: io.BytesIO) -> PVR:
-        out = cls()
+    def parse(self):
+        if self.is_parsed:
+            return
+        self.is_parsed = True
         # header
-        magic = stream.read(4)
+        magic = self.stream.read(4)
         if magic == b"GBIX":
-            length = read_struct(stream, "I")
-            out.gbix = stream.read(length)  # 1 or 2 ints?
-            magic = stream.read(4)
+            length = read_struct(self.stream, "I")
+            self.gbix = self.stream.read(length)  # 1 or 2 ints?
+            magic = self.stream.read(4)
         assert magic == b"PVRT"
-        out.data_size = read_struct(stream, "I")
-        pixel_mode, texture_mode = read_struct(stream, "2B")
-        out.format = Format(PixelMode(pixel_mode), TextureMode(texture_mode))
-        assert read_struct(stream, "H") == 0  # padding
-        out.size = read_struct(stream, "2H")
+        self.data_size = read_struct(self.stream, "I")
+        pixel_mode, texture_mode = read_struct(self.stream, "2B")
+        self.format = Format(PixelMode(pixel_mode), TextureMode(texture_mode))
+        assert read_struct(self.stream, "H") == 0  # padding
+        self.max_size = read_struct(self.stream, "2H")
         # mipmap indexing
-        out.num_frames = 1
-        out.num_mipmaps = 1
         # if out.format.texture.name.endswith("_MIPS"):
         #     raise NotImplementedError("PVR w/ mipmaps")
         #     out.num_mipmaps = ...
+        if self.format.pixel not in bytes_per_pixel:
+            # TODO: UserWarning / log
+            self.raw_data = self.stream.read()
+            return
         # calculate mip_sizes
-        width, height = out.size
-        try:
-            bpp = bytes_per_pixel[out.format.pixel]
-        except KeyError:
-            # TODO: UserWarning(f"Unknown bpp for format: {out.format.name}")
-            out.raw_data = stream.read()
-            return out
+        width, height = self.max_size
+        bpp = bytes_per_pixel[self.format.pixel]
         mip_sizes = [
             math.ceil((width >> i) * (height >> i) * bpp)
-            for i in range(out.num_mipmaps)]
+            for i in range(self.num_mipmaps)]
         # NOTE: should catch VQ & _MIPS TextureModes
-        if sum(mip_sizes) + 8 != out.data_size:
-            # TODO: UserWarning(f"Incorrect bpp for format: {out.format.name}")
-            out.raw_data = stream.read()
-            return out
+        if sum(mip_sizes) + 8 != self.data_size:
+            # TODO: UserWarning / log
+            self.raw_data = self.stream.read()
+            return  # invalid mip_sizes
         # read mipmaps
-        out.mipmaps = {
-            base.MipIndex(mip, 0, None): stream.read(mip_size)
+        self.mipmaps = {
+            base.MipIndex(mip, 0, None): self.stream.read(mip_size)
             for mip, mip_size in enumerate(mip_sizes)}
-        return out
 
+    @parse_first
     def as_bytes(self) -> bytes:
         stream = io.BytesIO()
         if isinstance(self.raw_data, bytes):
@@ -171,7 +165,7 @@ class PVR(base.Texture):
         write_struct(stream, "B", self.format.pixel.value)
         write_struct(stream, "B", self.format.texture.value)
         write_struct(stream, "H", 0)  # padding
-        write_struct(stream, "2H", *self.size)
+        write_struct(stream, "2H", *self.max_size)
         # mip data
         if isinstance(self.raw_data, bytes):
             stream.write(self.raw_data)

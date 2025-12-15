@@ -61,8 +61,6 @@ bytes_per_pixel = {
     Format.BGR_888_BLUESCREEN: 24,
     Format.ARGB_8888: 32,
     Format.BGRA_8888: 32,
-    # NOTE: DXT always encodes a 4x4 tile of texels
-    # -- also known as Block Compression (DXT1 <=> BC1 etc.)
     Format.DXT1: 0.5,
     Format.DXT3: 1,
     Format.DXT5: 1,
@@ -81,12 +79,26 @@ bytes_per_pixel = {
     Format.BC6H_UF16: 1}
 
 
-min_block_size = {
-    Format.DXT1: 8,
-    Format.DXT3: 16,
-    Format.DXT5: 16,
-    Format.DXT1_ONE_BIT_ALPHA: 8,
-    Format.BC6H_UF16: 16}
+dxt_formats = (
+    Format.DXT1,
+    Format.DXT3,
+    Format.DXT5,
+    Format.DXT1_ONE_BIT_ALPHA,
+    Format.BC6H_UF16)
+
+
+def mip_data_size(size, level, format_) -> int:
+    if format_ not in bytes_per_pixel:
+        return None  # unknown
+    width, height = size
+    width >>= level
+    height >>= level
+    if format_ in dxt_formats:
+        # round up to nearest full tile
+        width = max(math.ceil(width / 4) * 4, 4)
+        height = max(math.ceil(height / 4) * 4, 4)
+    bpp = bytes_per_pixel[format_]
+    return math.ceil(width * height * bpp)
 
 
 class Flags(enum.IntFlag):
@@ -215,7 +227,7 @@ class Vtf(base.Texture, breki.BinaryFile):
     def __repr__(self) -> str:
         major, minor = self.header.version
         version = f"v{major}.{minor}"
-        width, height = self.size
+        width, height = self.max_size
         size = f"{width}x{height}"
         format_ = self.header.format
         flags = self.header.flags
@@ -234,12 +246,12 @@ class Vtf(base.Texture, breki.BinaryFile):
         assert self.header.padding_1 == b"\0" * 4
         assert self.header.padding_2 == b"\0" * 4
         # expose the essentials
-        self.size = tuple(self.header.size)
+        self.max_size = tuple(self.header.size)
         self.num_frames = self.header.num_frames
         # funky alignment
         self.num_mipmaps = read_struct(self.stream, "B")
-        self.low_res_format = Format(read_struct(self.stream, "i"))
-        self.low_res_size = read_struct(self.stream, "2B")
+        self.thumbnail_format = Format(read_struct(self.stream, "i"))
+        self.thumbnail_size = read_struct(self.stream, "2B")
         if minor >= 2:  # v7.2+
             self.mipmap_depth = read_struct(self.stream, "H")
         if minor >= 3:  # v7.3+
@@ -259,47 +271,52 @@ class Vtf(base.Texture, breki.BinaryFile):
             self.stream.seek(self.header.header_size)
         # check assumptions
         assert self.header.first_frame == 0
-        # TODO: handle low res "thumbnail"
-        # -- will need a special MipIndex / key
-        assert self.low_res_format == Format.NONE
-        assert self.low_res_size == (0, 0)
+        # thumbnail
+        if "Thumbnail" in self.resources:
+            self.stream.seek(self.resources["Thumbnail"].offset)
+        if self.thumbnail_format == Format.NONE:
+            assert self.thumbnail_size == (0, 0)
+        elif self.thumbnail_format in bytes_per_pixel:
+            assert self.thumbnail_size != (0, 0)
+            self.mipmaps["thumbnail"] = self.stream.read(mip_data_size(
+                self.thumbnail_size, 0, self.thumbnail_format))
+        else:  # thumbnail w/ unknown bpp & mbs
+            # TODO: compare mip_sizes against total filesize
+            # -- whatever is left must be the thumbnail size
+            # TODO: UserWarning(f"Unknown bpp for format: {self.thumbnail_format}")
+            self.raw_data = self.stream.read()
+            return
         # seek to start of mipmaps
         if "Image Data" in self.resources:
             self.stream.seek(self.resources["Image Data"].offset)
-        else:
-            raise RuntimeError(
-                "Can't locate mipmaps without 'Image Data' resource")
-        # calculate mip_sizes
-        width, height = self.size
-        try:
-            bpp = bytes_per_pixel[self.header.format]
-        except KeyError:
-            # TODO: UserWarning(f"Unknown bpp for format: {self.format.name}")
+        # use raw_data if bytes_per_pixel is unknown
+        if self.header.format not in bytes_per_pixel:
+            # TODO: UserWarning(f"Unknown bpp for format: {self.header.format}")
             self.raw_data = self.stream.read()
             return
-        mbs = min_block_size.get(self.header.format, 0)
+        # calculate mip_sizes
         mip_sizes = [
-            max(math.ceil((width >> i) * (height >> i) * bpp), mbs)
+            mip_data_size(self.max_size, i, self.header.format)
             for i in range(self.num_mipmaps)]
         # read mipmaps
         if self.is_cubemap:
-            self.mipmaps = {
+            self.mipmaps.update({
                 base.MipIndex(mip, frame, face): self.stream.read(mip_size)
                 for mip, mip_size in reversed([*enumerate(mip_sizes)])
                 for frame in range(self.num_frames)
-                for face in base.Face}
+                for face in base.Face})
         else:
-            self.mipmaps = {
+            self.mipmaps.update({
                 base.MipIndex(mip, frame, None): self.stream.read(mip_size)
                 for mip, mip_size in reversed([*enumerate(mip_sizes)])
-                for frame in range(self.num_frames)}
+                for frame in range(self.num_frames)})
 
     @property
     @parse_first
     def as_json(self) -> Dict[str, Any]:
         return {
             "version": self.version,
-            "size": self.size,
+            "max_size": self.max_size,
             "flags": self.flags.name,
             "num_frames": self.num_frames,
             "first_frame": self.first_frame,

@@ -137,7 +137,7 @@ class Node:
         raise RuntimeError("ran out of lines before node closed")
 
 
-class VMT(base.Material, breki.TextFile):
+class Vmt(base.Material, breki.TextFile):
     exts = ["*.vmt"]
     # NOTE: top level node is kept for checking our work
     _raw: Node

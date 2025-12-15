@@ -1,63 +1,65 @@
 # http://mc.pp.se/dc/vms/icondata.html
 from __future__ import annotations
-import io
-from typing import List
+from typing import Any, Dict
 
 from PIL import Image
 from PIL import ImageOps
 
+import breki
 from breki.binary import read_struct
+from breki.files.parsed import parse_first
 
 from . import base
 
 
-class IconDataVMS(base.Texture):
-    extension: str = "vtf"
-    folder: str
-    filename: str
+class Vms(base.Texture, breki.BinaryFile):
+    """Icon Data VMS for Sega Dreamcast VMU"""
+    exts = ["*.vms"]
     # header
     desc: bytes
-    # pixels
-    monochrome: bytes  # 32x32 1-bit image (inverted)
-    colour_palette: List[int]
-    colour_indices: bytes  # 32x32 16 colour image (ARGB16)
+    mipmaps: Dict[str, Any]
+    # mipmaps["monochrome"]: bytes  # 1-bit (inverted colour)
+    # mipmaps["colour"]: Tuple[List[int], bytes]  # 16 colour ARGB16 palette
+    is_cubemap: bool = property(lambda s: False)
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, filepath: str, archive=None, code_page=None):
+        super().__init__(filepath, archive, code_page)
         self.desc = b""
+        self.max_size = (32, 32)
 
+    @parse_first
     def __repr__(self) -> str:
         mode = "colour" if len(self.mipmaps) == 2 else "monochrome"
         descriptor = f"32x32 {mode}"
         return f"<{self.__class__.__name__} {descriptor} @ 0x{id(self):016X}>"
 
-    @classmethod
-    def from_stream(cls, stream: io.BytesIO) -> IconDataVMS:
-        out = cls()
-        out.size = (32, 32)
-        out.desc = stream.read(16)
-        monochrome_offset = read_struct(stream, "I")
-        colour_offset = read_struct(stream, "I")
+    def parse(self):
+        if self.is_parsed:
+            return
+        self.is_parsed = True
+        self.desc = self.stream.read(16)
+        monochrome_offset = read_struct(self.stream, "I")
+        colour_offset = read_struct(self.stream, "I")
         # monchrome icon
-        stream.seek(monochrome_offset)
-        out.mipmaps[base.MipIndex(0, 0)] = stream.read(128)
-        out.monochrome = stream.read(128)
+        self.stream.seek(monochrome_offset)
+        self.mipmaps["monochrome"] = self.stream.read(128)
         if colour_offset != 0:
-            stream.seek(colour_offset)
-            palette = read_struct(stream, "16H")
-            indices = stream.read(512)
-            out.mipmaps[base.MipIndex(0, 1)] = (palette, indices)
-        return out
+            self.stream.seek(colour_offset)
+            palette = read_struct(self.stream, "16H")
+            indices = self.stream.read(512)
+            self.mipmaps["colour"] = (palette, indices)
 
+    # NOTE: requires Pillow
     def save_monochrome(self, filename: str):
-        monochrome = self.mipmaps[base.MipIndex(0, 0)]
+        monochrome = self.mipmaps["monochrome"]
         img = ImageOps.invert(Image.frombytes("1", (32, 32), monochrome))
         img.save(filename)
 
+    # NOTE: requires Pillow
     def save_colour(self, filename: str):
-        if base.MipIndex(0, 1) not in self.mipmaps:
+        if "colour" not in self.mipmaps:
             raise RuntimeError("no colour icon")
-        int_palette, indices = self.mipmaps[base.MipIndex(0, 1)]
+        int_palette, indices = self.mipmaps["colour"]
         assert len(int_palette) == 16
         assert len(indices) == 512
         palette = list()

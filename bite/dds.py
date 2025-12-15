@@ -296,23 +296,22 @@ class Dds(base.Texture, breki.BinaryFile):
     raw_data: Union[bytes, None]  # if mipmaps cannot be split
     # properties
     is_cubemap: bool
-    num_frames: int
 
     def __init__(self, filepath: str, archive=None, code_page=None):
+        super().__init__(filepath, archive, code_page)
         self.header = None
         self.header_2 = None
         self.raw_data = None
-        super().__init__(filepath, archive, code_page)
 
     @parse_first
     def __repr__(self) -> str:
-        if self.header is not None:
-            width, height = self.header.size
-            size = f"{width}x{height}"
+        width, height = self.max_size
+        size = f"{width}x{height}"
+        if self.header_2 is not None:
             dxgi = self.header_2.format
             return f"<DDS '{self.filename}' {size} {dxgi.name}>"
         else:
-            return f"<DDS '{self.filename}' with no header>"
+            return f"<DDS '{self.filename}' {size} with no header>"
 
     @parse_first
     def split(self) -> List[Dds]:
@@ -328,6 +327,8 @@ class Dds(base.Texture, breki.BinaryFile):
             child.filename = f"{base_filename}.{i}.dds"
             child.header = self.header
             child.header_2 = self.header_2
+            child.max_size = self.max_size
+            child.num_frames = 1
             if is_cubemap:
                 child.header_2.array_size = 6
                 indices = {
@@ -380,14 +381,14 @@ class Dds(base.Texture, breki.BinaryFile):
                 misc_flag=MiscFlag(0),
                 array_size=1)
         # expose the essentials
-        self.size = tuple(self.header.size)
+        self.max_size = tuple(self.header.size)
         self.num_mipmaps = self.header.num_mipmaps
         self.num_frames = self.header_2.array_size
         if self.is_cubemap:
             assert self.num_frames % 6 == 0
             self.num_frames = self.num_frames // 6
         # calculate mip_sizes
-        width, height = self.size
+        width, height = self.max_size
         dxgi = self.header_2.format
         try:
             bpp = bytes_per_pixel[dxgi]
@@ -416,6 +417,7 @@ class Dds(base.Texture, breki.BinaryFile):
     def as_bytes(self) -> bytes:
         assert self.header is not None
         assert self.header_2 is not None
+        # NOTE: assumes headers are accurate to data
         # headers
         out = [self.header.as_bytes()]
         if self.header_2.magic == b"DX10":

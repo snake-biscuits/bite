@@ -74,8 +74,7 @@ class MipIndex:
 
 class Texture(breki.ParsedFile):
     # header
-    size: Tuple[int, int]  # dimensions of largest mipmap
-    # NOTE: conflicts with ParsedFile.size (filesize in bytes)
+    max_size: Size  # dimensions of largest mipmap
     num_mipmaps: int
     num_frames: int
     # data
@@ -91,12 +90,12 @@ class Texture(breki.ParsedFile):
         super().__init__(filepath, archive, code_page)
         self.mipmaps = dict()
         self.raw_data = None
-        self.size = (0, 0)
+        self.max_size = (0, 0)
         self.num_mipmaps = 0
         self.num_frames = 0
 
     def __repr__(self) -> str:
-        width, height = self.size
+        width, height = self.max_size
         size = f"{width}x{height}"
         descriptor = f"'{self.filename}' {size} {len(self.mipmaps)} mipmaps"
         return f"<{self.__class__.__name__} {descriptor} @ 0x{id(self):016X}>"
@@ -107,7 +106,7 @@ class Texture(breki.ParsedFile):
         return MipIndex(0, 0, face)
 
     def mip_size(self, index: MipIndex) -> Size:
-        width, height = self.size
+        width, height = self.max_size
         width >>= index.mip
         height >>= index.mip
         return (width, height)

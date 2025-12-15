@@ -3,8 +3,8 @@ __all__ = [
     "vmt",
     "dds", "pvr", "vms", "vtf",
     "Face", "Material", "MipIndex", "Size", "Texture",
-    "VMT",
-    "Dds", "PVR", "IconDataVMS", "Vtf"]
+    "Vmt",
+    "Dds", "Pvr", "Vms", "Vtf"]
 
 # core
 from . import base
@@ -22,11 +22,11 @@ from . import vtf
 from .base import Face, Material, MipIndex, Size, Texture
 # material classes
 # from .matl import MATL
-from .vmt import VMT
+from .vmt import Vmt
 # texture classes
 from .dds import Dds
-from .pvr import PVR
-from .vms import IconDataVMS
+from .pvr import Pvr
+from .vms import Vms
 from .vtf import Vtf
 
 # extras
