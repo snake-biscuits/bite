@@ -1,6 +1,6 @@
 import numpy as np
 
-from bite.pixel import base
+from bite.pixels import base
 
 
 def test_Format():
