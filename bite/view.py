@@ -85,7 +85,7 @@ class Viewer:
                             min_value=0, max_value=5,
                             callback=self.face_callback)
                 with imgui.group():
-                    width, height = self.texture.size
+                    width, height = self.texture.max_size
                     self.preview_tag = imgui.add_image(
                         self.texture_tags[0],
                         width=width, height=height)
@@ -96,7 +96,7 @@ class Viewer:
         self.update()
 
     def mip_size(self, mip: int) -> Size:
-        return [axis // (1 << mip) for axis in self.texture.size]
+        return [axis // (1 << mip) for axis in self.texture.max_size]
 
     def pixels(self) -> np.array:  # 0..1 float32 RGBA
         # TODO: use a render.FrameBuffer for all textures

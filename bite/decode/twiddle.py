@@ -109,4 +109,4 @@ def TWIDDLED_to_ORDERED(texture: Texture, mip_index: MipIndex = None) -> bytes:
 
     return np.array([
         raw_bytes[i * 4:(i + 1) * 4]  # index whole pixel
-        for i in detwiddle_lut(*texture.size)]).flatten().tobytes()
+        for i in detwiddle_lut(*texture.max_size)]).flatten().tobytes()

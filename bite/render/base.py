@@ -223,5 +223,5 @@ class Renderer:
         # export renderbuffer colour
         gl.glPixelStorei(gl.GL_PACK_ALIGNMENT, 1)
         gl.glReadBuffer(gl.GL_COLOR_ATTACHMENT0)
-        pixels = gl.glReadPixels(0, 0, *self.texture.size, gl.GL_RGB, gl.GL_UNSIGNED_BYTE)
+        pixels = gl.glReadPixels(0, 0, *self.texture.max_size, gl.GL_RGB, gl.GL_UNSIGNED_BYTE)
         return np.frombuffer(pixels, dtype=np.uint8)

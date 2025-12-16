@@ -58,7 +58,7 @@ class FrameBuffer2D(base.Renderer):
         # TODO: get texture.is_compressed & internal_format first
         # -- that will help us pick shaders & extensions
         out = cls(
-            texture.size,
+            texture.max_size,
             np.array([
                 -1, -1,
                 +1, -1,
@@ -75,7 +75,7 @@ class FrameBuffer2D(base.Renderer):
         assert out.context.supports_glsl("450")
         out.texture = texture  # keep a copy
         # add data
-        size = texture.size
+        size = texture.max_size
         format_, is_compressed = internal_format(texture)
         data = texture.mipmaps[MipIndex(0, 0, Face(0))]
         out.init_texture_2d(size, format_, is_compressed, data)
