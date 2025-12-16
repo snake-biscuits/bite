@@ -1,6 +1,6 @@
 import os
 
-from bite.vmt import VMT
+from bite.materials.vmt import Vmt
 
 
 # TODO: pytest parametrise
@@ -8,7 +8,7 @@ from bite.vmt import VMT
 def test_vmt():
     materials_dir = "tests/files"
     material = "tv.vmt"
-    vmt = VMT.from_file(os.path.join(materials_dir, material))
+    vmt = Vmt.from_file(os.path.join(materials_dir, material))
     vmt.parse()
     assert vmt.shader == "UnlitTwoTexture"
     assert vmt.textures["colour"] == "dev/test_pattern"

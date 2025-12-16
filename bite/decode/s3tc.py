@@ -2,7 +2,7 @@
 # https://en.wikipedia.org/wiki/S3_Texture_Compression
 import numpy as np
 
-from ..base import MipIndex, Texture
+from ..textures.base import MipIndex, Texture
 
 
 # TODO: compressed blocks to numpy pixel array

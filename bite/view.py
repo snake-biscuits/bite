@@ -6,11 +6,11 @@ from typing import Any, Dict, List
 import dearpygui.dearpygui as imgui
 import numpy as np
 
-from .base import Face, MipIndex, Size, Texture
+from .textures.base import Face, MipIndex, Size, Texture
 # texture formats
-from . import dds
-from . import pvr
-from . import vtf
+from .textures import dds
+from .textures import pvr
+from .textures import vtf
 # mipmap translation
 from . import decode
 from . import render

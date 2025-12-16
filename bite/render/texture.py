@@ -4,9 +4,9 @@ import enum
 import numpy as np
 import OpenGL.GL as gl
 
-from ..base import Face, MipIndex, Size, Texture
-from .. import dds
-from .. import vtf
+from ..textures.base import Face, MipIndex, Size, Texture
+from ..textures import dds
+from ..textures import vtf
 from . import base
 
 

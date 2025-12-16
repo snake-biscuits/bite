@@ -1,33 +1,22 @@
 __all__ = [
-    "base", "decode", "pixel",
-    "vmt",
-    "dds", "pvr", "vms", "vtf",
-    "Face", "Material", "MipIndex", "Size", "Texture",
-    "Vmt",
+    "decode", "materials", "pixels", "textures",
+    "Material", "Slot",
+    "Face", "MipIndex", "Size", "Texture",
+    "Matl", "Vmt",
     "Dds", "Pvr", "Vms", "Vtf"]
 
 # core
-from . import base
 from . import decode
-from . import pixel
-# material formats
-# from . import matl
-from . import vmt
-# texture formats (includes flag enums etc.)
-from . import dds
-from . import pvr
-from . import vms
-from . import vtf
-# expose base
-from .base import Face, Material, MipIndex, Size, Texture
-# material classes
-# from .matl import MATL
-from .vmt import Vmt
-# texture classes
-from .dds import Dds
-from .pvr import Pvr
-from .vms import Vms
-from .vtf import Vtf
+from . import materials
+from . import pixels
+from . import textures
+# base classes / utils
+from .materials import Material, Slot
+from .textures import Face, MipIndex, Size, Texture
+# formats
+from .materials import Matl, Vmt
+from .textures import Dds, Pvr, Vms, Vtf
+
 
 # extras
 import importlib.util

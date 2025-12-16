@@ -8,7 +8,7 @@ from OpenGL.error import GLError
 import OpenGL.GL as gl
 import OpenGL.GLUT as glut
 
-from ..base import Size
+from ..textures.base import Size
 
 
 ShaderDict = Dict[str, str]

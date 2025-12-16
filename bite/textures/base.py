@@ -20,28 +20,6 @@ class Face(enum.Enum):
     BACK = 5  # Z-
 
 
-class Material(breki.ParsedFile):
-    # metadata
-    shader: str
-    is_transparent: bool
-    # data
-    textures: Dict[str, str]
-    # ^ {"role": "path"}
-
-    def __init__(self, filepath: str, archive=None, code_page=None):
-        super().__init__(filepath, archive, code_page)
-        self.shader = None
-        self.is_transparent = False
-        self.textures = dict()
-
-    def __repr__(self) -> str:
-        descriptor = " ".join([
-            f"'{self.filename}'",
-            f"{self.shader}",
-            f"{len(self.textures)} textures"])
-        return f"<{self.__class__.__name__} {descriptor} @ 0x{id(self):016X}>"
-
-
 class MipIndex:
     mip: int  # 0 = largest
     frame: int

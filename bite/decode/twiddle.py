@@ -4,8 +4,8 @@ from typing import List
 
 import numpy as np
 
-from ..base import Face, MipIndex, Texture
-from .. import pvr
+from ..textures.base import Face, MipIndex, Texture
+from ..textures import pvr
 
 
 # TODO: compare speed of iterate vs detwiddle_lut
