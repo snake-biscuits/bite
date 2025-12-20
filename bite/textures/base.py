@@ -84,6 +84,9 @@ class Texture(breki.ParsedFile):
         return MipIndex(0, 0, face)
 
     def mip_size(self, index: MipIndex) -> Size:
+        # NOTE: doesn't account for block compression
+        # -- if texture is block compressed, crop to this size
+        # -- after rounding up to the nearest block size
         width, height = self.max_size
         width >>= index.mip
         height >>= index.mip
