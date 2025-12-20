@@ -18,9 +18,12 @@ def concatenate(tiles: List[np.array], width: int, height: int) -> np.array:
     tile_width, tile_height = tiles[0].shape[:2]
     num_cols = math.ceil(width / tile_width)
     num_rows = math.ceil(height / tile_height)
-    return np.concatenate([
+    assert num_cols * num_rows == len(tiles)
+    out = np.concatenate([
         np.concatenate(tiles[i:i + num_cols], axis=0)
-        for i in range(0, num_rows, num_cols)], axis=1)
+        for i in range(0, len(tiles), num_cols)], axis=1)
+    assert out.shape[:2] == (num_cols * tile_width, num_rows * tile_height)
+    return out
 
 
 # NOTE: it's easier to calculate the DXT1 palette as rgb888
