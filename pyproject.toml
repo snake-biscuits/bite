@@ -33,7 +33,8 @@ classifiers = [
 
 dependencies = [
     "breki @ git+https://git@github.com/snake-biscuits/breki.git",
-    "numpy"
+    "numpy",
+    "Pillow"
 ]
 
 
@@ -43,7 +44,6 @@ dependencies = [
 # imgui texture viewer w/ OpenGL backend
 viewer = [
     "dearpygui",
-    "Pillow",
     "PyOpenGL"
 ]
 

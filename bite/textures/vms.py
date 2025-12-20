@@ -49,13 +49,11 @@ class Vms(base.Texture, breki.BinaryFile):
             indices = self.stream.read(512)
             self.mipmaps["colour"] = (palette, indices)
 
-    # NOTE: requires Pillow
     def save_monochrome(self, filename: str):
         monochrome = self.mipmaps["monochrome"]
         img = ImageOps.invert(Image.frombytes("1", (32, 32), monochrome))
         img.save(filename)
 
-    # NOTE: requires Pillow
     def save_colour(self, filename: str):
         if "colour" not in self.mipmaps:
             raise RuntimeError("no colour icon")
