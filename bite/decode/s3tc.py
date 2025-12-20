@@ -28,6 +28,7 @@ def concatenate(tiles: List[np.array], width: int, height: int) -> np.array:
 
 # NOTE: it's easier to calculate the DXT1 palette as rgb888
 # -- otherwise we'd assemble a 565 image & convert the whole image to 888
+# TODO: scale green intensity better
 @functools.cache
 def rgb565_as_rgb888(pixel: int) -> (int, int, int):
     r = (pixel >> 0xB) & 0x1F
@@ -53,18 +54,36 @@ def DXT1_block(block: bytes) -> np.array:
     # decode indices
     return np.array([[
         palette[(row >> (i * 2)) % 4]
-        for i in range(4)]
-        for row in block[4:]], dtype=np.uint8)
+        for row in block[4:]]
+        for i in range(4)], dtype=np.uint8)
+
+
+@functools.cache
+def DXT1_block_fast(block: bytes) -> np.array:
+    """single palette mode"""
+    c0, c1 = [rgb565_as_rgb888(c) for c in struct.unpack("2H", block[:4])]
+    c2 = [a * 2 // 3 + b // 3 for a, b in zip(c0, c1)]
+    c3 = [a // 3 + b * 2 // 3 for a, b in zip(c0, c1)]
+    palette = (c0, c1, tuple(c2), tuple(c3))
+    # decode indices
+    return np.array([[
+        palette[(row >> (i * 2)) % 4]
+        for row in block[4:]]
+        for i in range(4)], dtype=np.uint8)
 
 
 # NOTE: also known as BC1
-def DXT1(texture: Texture, mip_index: MipIndex = None) -> np.array:
+def DXT1(texture: Texture, mip_index: MipIndex = None, fast=True) -> np.array:
     """LDR RGB565 4x4 blocks"""
     if mip_index is None:
         mip_index = texture.default_mip()
     pixel_data = texture.mipmaps[mip_index]
+    decode_funcs = {
+        True: DXT1_block_fast,
+        False: DXT1_block}
+    decode_block = decode_funcs[fast]
     tiles = [
-        DXT1_block(pixel_data[i:i + 8])
+        decode_block(pixel_data[i:i + 8])
         for i in range(0, len(pixel_data), 8)]
     return concatenate(tiles, *texture.mip_size(mip_index))
 
@@ -73,9 +92,9 @@ def DXT1(texture: Texture, mip_index: MipIndex = None) -> np.array:
 def DXT3_alpha_block(block: bytes) -> np.array:
     """4x4 4bpp alpha"""
     alpha = np.array([
-        [block[i // 2] >> 4 if i % 2 == 0 else block[i // 2] & 0xF]
-        for i in range(8)], dtype=np.uint8)
-    return alpha | alpha << 4
+        block[i // 2] >> 4 if i % 2 == 0 else block[i // 2] & 0xF
+        for i in range(16)], dtype=np.uint8)
+    return (alpha | alpha << 4).reshape((4, 4, 1))
 
 
 # NOTE: both DXT2 & DXT3 are BC2
@@ -89,8 +108,7 @@ def DXT3(texture: Texture, mip_index: MipIndex = None) -> np.array:
     rgb_tiles = list()
     for i in range(0, len(pixel_data), 16):
         a_tiles.append(DXT3_alpha_block(pixel_data[i:i + 8]))
-        rgb_tiles.append(DXT1_block(pixel_data[i + 8:i + 16]))
-    # NOTE: DXT1_block should always be using C0 > C1 palette mode
+        rgb_tiles.append(DXT1_block_fast(pixel_data[i + 8:i + 16]))
     tiles = [
         np.concatenate((rgb, a), axis=2)
         for rgb, a in zip(rgb_tiles, a_tiles)]
@@ -122,10 +140,10 @@ def DXT5_alpha_block(block: bytes) -> np.array:
         int(block[3:5].hex()[1:], 16),
         int(block[5:7].hex()[:3], 16),
         int(block[6:8].hex()[1:], 16)]
-    return np.array([[
+    return np.rot90(np.array([[
         [palette[(row >> (i * 3)) & 0b111]]
         for i in range(4)]
-        for row in rows], dtype=np.uint8)
+        for row in rows], dtype=np.uint8), 3)
 
 
 # NOTE: Both DXT4 & DXT5 are BC3
@@ -139,7 +157,7 @@ def DXT5(texture: Texture, mip_index: MipIndex = None) -> np.array:
     rgb_tiles = list()
     for i in range(0, len(pixel_data), 16):
         a_tiles.append(DXT5_alpha_block(pixel_data[i:i + 8]))
-        rgb_tiles.append(DXT1_block(pixel_data[i + 8:i + 16]))
+        rgb_tiles.append(DXT1_block_fast(pixel_data[i + 8:i + 16]))
     tiles = [
         np.concatenate((rgb, a), axis=2)
         for rgb, a in zip(rgb_tiles, a_tiles)]
