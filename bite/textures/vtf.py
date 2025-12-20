@@ -233,6 +233,13 @@ class Vtf(base.Texture, breki.BinaryFile):
         flags = self.header.flags
         return f"<VTF {version} '{self.filename}' {size} {format_.name} flags={flags.name}>"
 
+    @parse_first
+    def mip_size(self, mip_index: base.MipIndex) -> base.Size:
+        if mip_index == "thumbnail":
+            return self.thumbnail_size
+        else:
+            return super().mip_size(mip_index)
+
     def parse(self):
         if self.is_parsed:
             return
