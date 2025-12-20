@@ -79,7 +79,7 @@ class Texture(breki.ParsedFile):
         return f"<{self.__class__.__name__} {descriptor} @ 0x{id(self):016X}>"
 
     # utilities
-    def default_index(self) -> MipIndex:
+    def default_mip(self) -> MipIndex:
         face = Face(0) if self.is_cubemap else None
         return MipIndex(0, 0, face)
 

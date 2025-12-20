@@ -72,12 +72,9 @@ $ pip install bite
 >>> import bite
 >>> dds = bite.DDS.from_file("path/to/file.dds")
 >>> dds.parse()
->>> if dds.is_cubemap:
-...     raw_pixels = dds.mipmaps[bite.MipIndex(0, 0, None)]
-... else:
-...     raw_pixels = dds.mipmaps[bite.MipIndex(0, 0, bite.Face(0))]
-... 
->>> width, height = dds.mip_size(0)
+>>> mip = dds.default_mip()
+>>> raw_pixels = dds.mipmaps[mip]
+>>> width, height = dds.mip_size(mip)
 >>> # TODO: check `dds.header.format` so you can decode the pixels
 >>> # --- `dds.header.format` is an `enum.Enum` subclass: `bite.dds.DXGI`
 >>> # TODO: do something with the pixels
