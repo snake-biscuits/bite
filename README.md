@@ -9,21 +9,23 @@ Python library for parsing textures and materials for game modding
 
 > NOTE: currently only supports a narrow spec of these formats
 
-| Extension | Name |
-| :--- | :--- |
-| `.dds` | Direct Draw Surface |
-| `.pvr` | PowerVR Texture |
-| `.vtf` | Valve Texture Format |
+| Extension | Name                      |
+| :-------- | :------------------------ |
+| `.dds`    | Direct Draw Surface       |
+| `.pvr`    | PowerVR Texture           |
+| `.vms`    | Dreamcast VMU IconDataVMS |
+| `.vtf`    | Valve Texture Format      |
 
 
 ## Planned Formats
 
-| Extension | Name |
-| :--- | :--- |
-| `.vmt` | Valve Material |
+| Extension | Name           |
+| :-------- | :------------- |
+| `.json`   | Rpak Material  |
+| `.vmt`    | Valve Material |
 
-> TODO: Also some form of `.rpak` material (`.json` / `.msw` / `.uber`)
-
+> NOTE: `Matl` parses the [RSX](https://github.com/r-ex/rsx) `.json` format
+> -- similar to the [RePak](https://github.com/r-ex/RePak) `.json` format
 
 ## Similar Tools
 
@@ -35,6 +37,8 @@ If you just want a tool for one specific format, try these:
  - `.vtf`
    * [VTFEdit](https://valvedev.info/tools/vtfedit/)
    * [VTFLib](https://github.com/NeilJed/VTFLib)
+ - `.vms`
+   * [VMU TOOL PC](https://github.com/sizious/vmu-tool-pc)
 
 
 ## Installation
@@ -67,13 +71,14 @@ $ pip install bite
 ```python
 >>> import bite
 >>> dds = bite.DDS.from_file("path/to/file.dds")
+>>> dds.parse()
 >>> if dds.is_cubemap:
 ...     raw_pixels = dds.mipmaps[bite.MipIndex(0, 0, None)]
 ... else:
 ...     raw_pixels = dds.mipmaps[bite.MipIndex(0, 0, bite.Face(0))]
 ... 
->>> width, height = dds.size
->>> # TODO: check `dds.format` so you can decode the pixels
->>> # --- `dds.format` is an `enum.Enum` subclass: `bite.dds.DXGI`
+>>> width, height = dds.mip_size(0)
+>>> # TODO: check `dds.header.format` so you can decode the pixels
+>>> # --- `dds.header.format` is an `enum.Enum` subclass: `bite.dds.DXGI`
 >>> # TODO: do something with the pixels
 ```
