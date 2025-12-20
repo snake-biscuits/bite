@@ -259,6 +259,8 @@ class Vtf(base.Texture, breki.BinaryFile):
         self.num_mipmaps = read_struct(self.stream, "B")
         self.thumbnail_format = Format(read_struct(self.stream, "i"))
         self.thumbnail_size = read_struct(self.stream, "2B")
+        if minor == 1:  # v7.1
+            assert self.stream.read(1) == b"\0"  # padding
         if minor >= 2:  # v7.2+
             self.mipmap_depth = read_struct(self.stream, "H")
         if minor >= 3:  # v7.3+
