@@ -1,5 +1,4 @@
-# https://dearpygui.readthedocs.io/en/latest/documentation/
-# https://gist.github.com/leon-nn/cd4e3d50eb0fa23d8e197102f49f2cb3
+# https://dearpygui.readthedocs.io/en/latest/index.html
 import os
 from typing import Any, Dict, List
 
