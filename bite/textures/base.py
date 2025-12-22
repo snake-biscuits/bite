@@ -52,6 +52,9 @@ class MipIndex:
 
 class Texture(breki.ParsedFile):
     # header
+    format: enum.Enum  # per-subclass
+    # TODO: pixel_format: pixels.Format
+    # TODO: pixel_layout: pixels.Layout
     max_size: Size  # dimensions of largest mipmap
     num_mipmaps: int
     num_frames: int

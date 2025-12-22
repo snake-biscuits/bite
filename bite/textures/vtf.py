@@ -207,8 +207,9 @@ class Vtf(base.Texture, breki.BinaryFile):
     resources: List[Resource]
     cma: Union[None, CMA]
     # essentials
-    size: base.Size
+    format: Format
     num_frames: int
+    max_size: base.Size
     mipmaps: Dict[base.MipIndex, bytes]
     # ^ {MipIndex(mip, frame, face): b"raw_mipmap"}
     raw_data: Union[None, bytes]
@@ -222,6 +223,7 @@ class Vtf(base.Texture, breki.BinaryFile):
         self.cma = None
         self.header = None
         self.resources = list()
+        self.format = Format.NONE
 
     @parse_first
     def __repr__(self) -> str:
@@ -229,9 +231,9 @@ class Vtf(base.Texture, breki.BinaryFile):
         version = f"v{major}.{minor}"
         width, height = self.max_size
         size = f"{width}x{height}"
-        format_ = self.header.format
-        flags = self.header.flags
-        return f"<VTF {version} '{self.filename}' {size} {format_.name} flags={flags.name}>"
+        format_ = self.format.name
+        flags = self.header.flags.name
+        return f"<VTF {version} '{self.filename}' {size} {format_} flags={flags}>"
 
     @parse_first
     def mip_size(self, mip_index: base.MipIndex) -> base.Size:
@@ -253,6 +255,7 @@ class Vtf(base.Texture, breki.BinaryFile):
         assert self.header.padding_1 == b"\0" * 4
         assert self.header.padding_2 == b"\0" * 4
         # expose the essentials
+        self.format = self.header.format
         self.max_size = tuple(self.header.size)
         self.num_frames = self.header.num_frames
         # funky alignment
@@ -299,13 +302,13 @@ class Vtf(base.Texture, breki.BinaryFile):
         if "Image Data" in self.resources:
             self.stream.seek(self.resources["Image Data"].offset)
         # use raw_data if bytes_per_pixel is unknown
-        if self.header.format not in bytes_per_pixel:
-            # TODO: UserWarning(f"Unknown bpp for format: {self.header.format}")
+        if self.format not in bytes_per_pixel:
+            # TODO: UserWarning(f"Unknown bpp for format: {self.format}")
             self.raw_data = self.stream.read()
             return
         # calculate mip_sizes
         mip_sizes = [
-            mip_data_size(self.max_size, i, self.header.format)
+            mip_data_size(self.max_size, i, self.format)
             for i in range(self.num_mipmaps)]
         # read mipmaps
         if self.is_cubemap:
@@ -333,8 +336,8 @@ class Vtf(base.Texture, breki.BinaryFile):
             "bumpmap_scale": self.bumpmap_scale,
             "format": self.format.name,
             "num_mipmaps": self.num_mipmaps,
-            "low_res_format": self.low_res_format.name,
-            "low_res_size": self.low_res_size,
+            "thumbnail_format": self.thumbnail_format.name,
+            "thumbnail_size": self.thumbnail_size,
             "mipmap_depth": self.mipmap_depth,
             "resources": {k: str(v) for k, v in self.resources.items()},
             "cma": self.cma.as_json if self.cma is not None else None}
@@ -352,8 +355,8 @@ class Vtf(base.Texture, breki.BinaryFile):
         self.header.header_size = header_size
         stream.write(self.header.as_bytes())
         write_struct(stream, "B", self.num_mipmaps)
-        write_struct(stream, "i", self.low_res_format.value)
-        write_struct(stream, "2B", *self.low_res_size)
+        write_struct(stream, "i", self.thumbnail_format.value)
+        write_struct(stream, "2B", *self.thumbnail_size)
         # v7.2+
         write_struct(stream, "H", self.mipmap_depth)
         # v7.3+

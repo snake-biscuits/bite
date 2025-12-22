@@ -290,6 +290,7 @@ class Dds(base.Texture, breki.BinaryFile):
     exts = ["*.dds"]
     header: DdsHeader
     header_2: DX10Header
+    format: DXGI
     # pixel data
     mipmaps: Dict[base.MipIndex, bytes]
     # ^ {MipIndex(mip, frame, face): raw_mipmap_data}
@@ -299,6 +300,7 @@ class Dds(base.Texture, breki.BinaryFile):
 
     def __init__(self, filepath: str, archive=None, code_page=None):
         super().__init__(filepath, archive, code_page)
+        self.format = DXGI.UNKNOWN
         self.header = None
         self.header_2 = None
         self.raw_data = None
@@ -307,11 +309,7 @@ class Dds(base.Texture, breki.BinaryFile):
     def __repr__(self) -> str:
         width, height = self.max_size
         size = f"{width}x{height}"
-        if self.header_2 is not None:
-            dxgi = self.header_2.format
-            return f"<DDS '{self.filename}' {size} {dxgi.name}>"
-        else:
-            return f"<DDS '{self.filename}' {size} with no header>"
+        return f"<DDS '{self.filename}' {size} {self.format.name}>"
 
     @parse_first
     def split(self) -> List[Dds]:
@@ -375,12 +373,13 @@ class Dds(base.Texture, breki.BinaryFile):
             # assert self.header_2.unknown == 0x00401008
             assert self.header_2.reserved_2 == b"\0" * 16
         else:  # magic -> dummy header_2
-            dxgi = dxgi_from_magic[magic]
             self.header_2 = DX10Header(
+                array_size=1,
                 dimension=Dimension.TEXTURE_2D,
-                misc_flag=MiscFlag(0),
-                array_size=1)
+                format=dxgi_from_magic[magic],
+                misc_flag=MiscFlag(0))
         # expose the essentials
+        self.format = self.header_2.format
         self.max_size = tuple(self.header.size)
         self.num_mipmaps = self.header.num_mipmaps
         self.num_frames = self.header_2.array_size
@@ -389,14 +388,13 @@ class Dds(base.Texture, breki.BinaryFile):
             self.num_frames = self.num_frames // 6
         # calculate mip_sizes
         width, height = self.max_size
-        dxgi = self.header_2.format
         try:
-            bpp = bytes_per_pixel[dxgi]
+            bpp = bytes_per_pixel[self.format]
         except KeyError:
-            # TODO: UserWarning(f"Unknown bpp for format: {dxgi.name}")
+            # TODO: UserWarning(f"Unknown bpp for format: {self.format.name}")
             self.raw_data = self.stream.read()
             return
-        mbs = min_block_size.get(dxgi, 0)
+        mbs = min_block_size.get(self.format, 0)
         mip_sizes = [
             max(math.ceil((width >> i) * (height >> i) * bpp), mbs)
             for i in range(self.num_mipmaps)]
@@ -426,7 +424,7 @@ class Dds(base.Texture, breki.BinaryFile):
             dxgi_magic = {
                 dxgi: magic
                 for magic, dxgi in dxgi_from_magic.items()}
-            out.append(dxgi_magic[self.header_2.format])
+            out.append(dxgi_magic[self.format])
         # mip data
         if isinstance(self.raw_data, bytes):
             out.append(self.raw_data)

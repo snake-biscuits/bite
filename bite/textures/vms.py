@@ -17,7 +17,9 @@ class Vms(base.Texture, breki.BinaryFile):
     exts = ["*.vms"]
     # header
     desc: bytes
+    # essentials
     mipmaps: Dict[str, Any]
+    # NOTE: no .format enum
     # mipmaps["monochrome"]: bytes  # 1-bit (inverted colour)
     # mipmaps["colour"]: Tuple[List[int], bytes]  # 16 colour ARGB16 palette
     is_cubemap: bool = property(lambda s: False)
@@ -32,6 +34,9 @@ class Vms(base.Texture, breki.BinaryFile):
         mode = "colour" if len(self.mipmaps) == 2 else "monochrome"
         descriptor = f"32x32 {mode}"
         return f"<{self.__class__.__name__} {descriptor} @ 0x{id(self):016X}>"
+
+    # TODO: default_mip
+    # TODO: mip_size
 
     def parse(self):
         if self.is_parsed:
