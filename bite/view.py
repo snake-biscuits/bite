@@ -39,22 +39,20 @@ class Viewer:
         name, path = list(app_data["selections"].items())[0]
         base, ext = os.path.splitext(path.lower())
         if ext == ".dds":
-            self.texture = dds.DDS.from_file(path)
+            self.texture = dds.Dds.from_file(path)
         elif ext == ".pvr":
-            self.texture = pvr.PVR.from_file(path)
+            self.texture = pvr.Pvr.from_file(path)
         elif ext == ".vtf":
-            self.texture = vtf.VTF.from_file(path)
+            self.texture = vtf.Vtf.from_file(path)
         else:
             raise RuntimeError(f"Unknown Extension: {ext!r}")
+        # load texture data
+        self.texture.parse()
         if self.texture.raw_data is not None:
             raise RuntimeError(f"Unsupported Format: {self.texture.format}")
-        # set default self.index
-        if self.texture.is_cubemap:
-            self.index = MipIndex(0, 0, Face(0))
-        else:
-            self.index = MipIndex(0, 0, None)
-        # raw textures
+        self.index = self.texture.default_mip()
         self.texture_tags = list()
+        # register mip textures
         with imgui.texture_registry(show=False):
             for mip in range(self.texture.num_mipmaps):
                 width, height = self.mip_size(mip)
@@ -96,16 +94,17 @@ class Viewer:
         self.update()
 
     def mip_size(self, mip: int) -> Size:
-        return [axis // (1 << mip) for axis in self.texture.max_size]
+        # return [axis // (1 << mip) for axis in self.texture.max_size]
+        return self.texture.mip_size(MipIndex(mip=mip))
 
     def pixels(self) -> np.array:  # 0..1 float32 RGBA
         # TODO: use a render.FrameBuffer for all textures
         # -- create at initialisation
-        if isinstance(self.texture, dds.DDS):
+        if isinstance(self.texture, dds.Dds):
             texture_bytes = self.pixels_dds()
-        elif isinstance(self.texture, pvr.PVR):
+        elif isinstance(self.texture, pvr.Pvr):
             texture_bytes = self.pixels_pvr()
-        elif isinstance(self.texture, vtf.VTF):
+        elif isinstance(self.texture, vtf.Vtf):
             texture_bytes = self.pixels_vtf()
         else:
             cls = self.texture.__class__.__name__
@@ -139,8 +138,29 @@ class Viewer:
 
     def pixels_vtf(self) -> bytes:  # RGBA_8888
         # TODO: support more formats
-        assert self.texture.format == vtf.Format.RGBA_8888
-        return self.texture.mipmaps[self.index]
+        if self.texture.format == vtf.Format.RGBA_8888:
+            return self.texture.mipmaps[self.index]
+        # S3TC decoders
+        elif self.texture.format == vtf.Format.DXT1:
+            out = decode.s3tc.DXT1(self.texture, self.index)
+        elif self.texture.format == vtf.Format.DXT3:
+            out = decode.s3tc.DXT3(self.texture, self.index)
+        elif self.texture.format == vtf.Format.DXT5:
+            out = decode.s3tc.DXT5(self.texture, self.index)
+        # trim tiles
+        out_size = out.shape[:2]
+        width, height = self.mip_size(self.index.mip)
+        if out_size != (width, height):
+            out = out[:width + 1, :height + 1]
+        # RGB -> RGBA
+        mode = out.shape[2]
+        if mode == 3:  # DXT1 -> RGB_888
+            out = rgb_to_rgba(out.flatten().tobytes())
+        elif mode == 4:  # DXTn -> RGBA_8888
+            out = out.flatten().tobytes()
+        else:
+            raise RuntimeError(f"invalid DXT decode: {mode=}")
+        return out
 
     def update(self):
         """update texture to reflect current index"""
