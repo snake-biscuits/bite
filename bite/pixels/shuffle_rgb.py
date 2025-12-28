@@ -32,9 +32,9 @@ def RGB565_to_RGB24(raw_pixels: bytes) -> bytes:
     r = (rgb565 >> 0xB) & 0x1F
     g = (rgb565 >> 0x5) & 0x3F
     b = (rgb565 >> 0x0) & 0x1F
-    r = (r | r << 3) & 0xFF
-    g = (g | g << 2) & 0xFF
-    b = (b | b << 3) & 0xFF
+    r = r << 3 | r >> 2
+    g = g << 2 | g >> 4
+    b = b << 3 | b >> 2
     rgb24 = np.empty((rgb565.size * 3,), dtype=np.uint8)
     rgb24[0::3] = r
     rgb24[1::3] = g

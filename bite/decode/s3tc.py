@@ -14,6 +14,7 @@ from ..textures.base import MipIndex, Texture
 # -- mode = {3: "RGB", 4: "RGBA"}[out.shape[3]]
 # -- img = Image.frombytes(mode, out.shape[:2], out.flatten().tobytes())
 # -- img = img.crop((0, 0, *texture.mip_size(mip_index)))
+# -- OR: out = out[:width, :height]
 def concatenate(tiles: List[np.array], width: int, height: int) -> np.array:
     tile_width, tile_height = tiles[0].shape[:2]
     num_cols = math.ceil(width / tile_width)
@@ -28,15 +29,14 @@ def concatenate(tiles: List[np.array], width: int, height: int) -> np.array:
 
 # NOTE: it's easier to calculate the DXT1 palette as rgb888
 # -- otherwise we'd assemble a 565 image & convert the whole image to 888
-# TODO: scale green intensity better
 @functools.cache
 def rgb565_as_rgb888(pixel: int) -> (int, int, int):
     r = (pixel >> 0xB) & 0x1F
     g = (pixel >> 0x5) & 0x3F
     b = (pixel >> 0x0) & 0x1F
-    r = (r | r << 3) & 0xFF
-    g = (g | g << 2) & 0xFF
-    b = (b | b << 3) & 0xFF
+    r = r << 3 | r >> 2
+    g = g << 2 | g >> 4
+    b = b << 3 | b >> 2
     return (r, g, b)
 
 
