@@ -9,22 +9,16 @@ Python library for parsing textures and materials for game modding
 
 > NOTE: currently only supports a narrow spec of these formats
 
-| Extension | Name                      |
-| :-------- | :------------------------ |
-| `.dds`    | Direct Draw Surface       |
-| `.pvr`    | PowerVR Texture           |
-| `.vms`    | Dreamcast VMU IconDataVMS |
-| `.vtf`    | Valve Texture Format      |
+| Class            | Extension | Name                      |
+| :--------------- | :-------- | :------------------------ |
+| `textures.Dds`   | `.dds`    | Direct Draw Surface       |
+| `textures.Pvr`   | `.pvr`    | PowerVR Texture           |
+| `textures.Vms`   | `.vms`    | Dreamcast VMU IconDataVMS |
+| `textures.Vtf`   | `.vtf`    | Valve Texture Format      |
+| `materials.Matl` | `.json`   | Rpak Material             |
+| `materials.Vmt`  | `.vmt`    | Valve Material            |
 
-
-## Planned Formats
-
-| Extension | Name           |
-| :-------- | :------------- |
-| `.json`   | Rpak Material  |
-| `.vmt`    | Valve Material |
-
-> NOTE: `Matl` parses the [RSX](https://github.com/r-ex/rsx) `.json` format
+> NOTE: `Matl` parses the [rSX](https://github.com/r-ex/rsx) `.json` format
 > -- similar to the [RePak](https://github.com/r-ex/RePak) `.json` format
 
 ## Similar Tools
@@ -32,9 +26,13 @@ Python library for parsing textures and materials for game modding
 If you just want a tool for one specific format, try these:
  - `.dds`
    * [texconv](https://github.com/Microsoft/DirectXTex/wiki/Texconv)
+ - `Matl` `.json`
+   * [io_import_rbsp](https://github.com/snake-biscuits/io_import_rbsp)
+   * [RePak](https://github.com/r-ex/RePak)
+   * [rSX](https://github.com/r-ex/rsx)
  - `.pvr`
    * [pvr2image](https://github.com/VincentNLOBJ/pvr2image)
- - `.vtf`
+ - `.vmt` & `.vtf`
    * [VTFEdit](https://valvedev.info/tools/vtfedit/)
    * [VTFLib](https://github.com/NeilJed/VTFLib)
  - `.vms`
