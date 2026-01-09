@@ -108,7 +108,7 @@ class Node:
         if prev_line is not None:
             out.name = prev_line
         i = 0
-        while i <= len(lines):
+        while i < len(lines):
             line = lines[i]
             line, sep, comment = line.partition("//")
             line = line.strip()  # no leading / trailing whitespace
@@ -134,7 +134,9 @@ class Node:
                     prev_line = name
                 else:
                     prev_line = line
-        raise RuntimeError("ran out of lines before node closed")
+        # TODO: warn / log instead of throwing an error
+        # raise RuntimeError("ran out of lines before node closed")
+        return out
 
 
 class Vmt(base.Material, breki.TextFile):
