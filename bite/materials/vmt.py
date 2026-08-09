@@ -14,9 +14,14 @@ from . import base
 texture_parameters = {
     "$basetexture": "colour",
     "$basetexture2": "colour2",
+    "$basetexture3": "colour3",
+    "$basetexture4": "colour4",
     "$blendmodulatetexture": "blend_modulate",
     "$bumpmap": "normal",
     "$bumpmap2": "normal2",
+    "$BASENORMALMAP2": "normal2",
+    "$BASENORMALMAP3": "normal3",
+    "$BASENORMALMAP4": "normal4",
     # NOTE: if `$ssbump` is true, bumpmap is a self-shadowing bumpmap
     "$envmap": "cubemap",
     # NOTE: not always a texture, can be "env_cubemap"
