@@ -48,3 +48,5 @@ class Slot(enum.Enum):
     NORMAL_2 = 24
     GLOSS_2 = 25
     SPECULAR_2 = 26
+
+    # TODO: 3rd & 4th texture sets for Lightmapped_4WayBlend
